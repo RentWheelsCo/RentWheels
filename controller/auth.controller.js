@@ -3,6 +3,9 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { StatusCodes } from "http-status-codes";
 import { registerSchema, loginSchema } from "../validations/auth.validation.js";
+import crypto from 'crypto';
+import { OAuth2Client } from "google-auth-library";
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const generateToken = (user) => {
     return jwt.sign(
@@ -84,6 +87,14 @@ export const login = async (req, res, next) => {
             });
         }
 
+        if (!user.password) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "This account uses google login. Please login with Google.",
+            });
+        }
+
         const isMatch = await bcrypt.compare(parsed.password, user.password);
 
         if (!isMatch) {
@@ -139,6 +150,67 @@ export const getProfile = async (req, res, next) => {
                     ? JSON.parse(user.licensePhoto)
                     : null,
                 isVerified: user.isVerified,
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+
+export const googleLogin = async (req, res, next) => {
+    try {
+        const { idToken } = req.body;
+
+        const ticket = await client.verifyIdToken({
+            idToken,
+            audience: process.env.GOOGLE_CLIENT_ID,
+        });
+
+        const payload = ticket.getPayload();
+        const { email, email_verified, name, sub } = payload;
+
+        if (!email || !email_verified) {
+            return res.status(StatusCodes.UNAUTHORIZED).json({
+                success: false,
+                status: StatusCodes.UNAUTHORIZED,
+                message: "Google account email not verified",
+            });
+        }
+
+        let user = await prisma.user.findUnique({
+            where: { email },
+        });
+
+        if (!user) {
+            user = await prisma.user.create({
+                data: {
+                    name,
+                    email,
+                    password: null,
+                    googleId: sub,
+                    isVerified: true,
+                },
+            });
+        } else if (!user.googleId) {
+            user = await prisma.user.update({
+                where: { id: user.id },
+                data: { googleId: sub },
+            });
+        }
+
+        const token = generateToken(user);
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            message: "Google login successful",
+            data: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                isVerified: user.isVerified,
+                token,
             },
         });
     } catch (error) {
