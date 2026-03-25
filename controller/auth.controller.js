@@ -354,3 +354,46 @@ export const resetPassword = async (req, res, next) => {
         next(error);
     }
 };
+
+export const uploadUserDocuments = async (req, res, next) => {
+    try {
+        const profilePhoto = req.files?.profilePhoto?.[0]?.path || null;
+        const licenseFront = req.files?.licensePhoto?.[0]?.path || null;
+        const licenseBack = req.files?.licensePhoto?.[1]?.path || null;
+        const licensePhoto = licenseFront
+            ? licenseBack
+                ? [licenseFront, licenseBack]
+                : [licenseFront]
+            : null;
+
+        if (!profilePhoto && !licensePhoto) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "At least one file is required (profilePhoto or licensePhoto).",
+            });
+        }
+
+        const data = {};
+        if (profilePhoto) data.profilePhoto = profilePhoto;
+        if (licensePhoto) data.licensePhoto = JSON.stringify(licensePhoto);
+
+        const user = await prisma.user.update({
+            where: { id: req.user.id },
+            data,
+        });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            message: "Documents uploaded successfully.",
+            data: {
+                id: user.id,
+                profilePhoto: user.profilePhoto,
+                licensePhoto: user.licensePhoto ? JSON.parse(user.licensePhoto) : null,
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
