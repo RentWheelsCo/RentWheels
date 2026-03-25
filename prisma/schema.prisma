@@ -24,4 +24,6 @@ model User {
   googleId String? @unique
   isVerified   Boolean  @default(false)
   createdAt    DateTime @default(now())
+  resetPasswordToken   String?
+  resetPasswordExpires DateTime?
 }

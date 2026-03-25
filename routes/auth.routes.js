@@ -1,5 +1,5 @@
 import express from "express";
-import { register, login, getProfile, googleLogin } from "../controller/auth.controller.js";
+import { register, login, getProfile, googleLogin, forgotPassword, resetPassword } from "../controller/auth.controller.js";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
 import { uploadFields } from "../middlewares/upload.middleware.js";
 import { validateGoogleLogin } from "../middlewares/validateGoogleLogin.middleware.js";
@@ -9,6 +9,8 @@ const router = express.Router();
 router.post("/register", uploadFields, register);
 router.post("/login", login);
 router.post("/google", validateGoogleLogin, googleLogin);
+router.post("/forgot-password", forgotPassword);
+router.post("/reset-password", resetPassword);
 
 router.get("/profile", authMiddleware, getProfile);
 
