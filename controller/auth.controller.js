@@ -2,9 +2,10 @@ import prisma from "../utils/db.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { StatusCodes } from "http-status-codes";
-import { registerSchema, loginSchema } from "../validations/auth.validation.js";
+import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from "../validations/auth.validation.js";
 import crypto from 'crypto';
 import { OAuth2Client } from "google-auth-library";
+import { sendEmail } from "../utils/email.js";
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const generateToken = (user) => {
@@ -13,6 +14,12 @@ const generateToken = (user) => {
         process.env.JWT_SECRET,
         { expiresIn: "7d" }
     );
+};
+
+const createResetToken = () => {
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+    return { rawToken, hashedToken };
 };
 
 export const register = async (req, res, next) => {
@@ -212,6 +219,136 @@ export const googleLogin = async (req, res, next) => {
                 isVerified: user.isVerified,
                 token,
             },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const forgotPassword = async (req, res, next) => {
+    try {
+        const parsed = forgotPasswordSchema.parse(req.body);
+        const isDev = process.env.NODE_ENV !== "production";
+
+        const user = await prisma.user.findUnique({
+            where: { email: parsed.email },
+        });
+
+        if (!user) {
+            return res.status(StatusCodes.OK).json({
+                success: true,
+                status: StatusCodes.OK,
+                message: isDev
+                    ? `No account found for ${parsed.email}.`
+                    : "If the email exists, a reset link has been sent.",
+            });
+        }
+
+        if (!user.password) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "This account uses google login. Please login with Google.",
+            });
+        }
+
+        const { rawToken, hashedToken } = createResetToken();
+        const expires = new Date(Date.now() + 1000 * 60 * 15);
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                resetPasswordToken: hashedToken,
+                resetPasswordExpires: expires,
+            },
+        });
+
+        const appUrl = process.env.APP_URL || "http://localhost:3000";
+        const resetUrl = `${appUrl.replace(/\/$/, "")}/reset-password?token=${rawToken}`;
+
+        const subject = "Reset your password";
+        const text = `You requested a password reset. Use this link to reset your password: ${resetUrl}. This link will expire in 15 minutes.`;
+        const html = `
+            <p>You requested a password reset.</p>
+            <p><a href="${resetUrl}">Click here to reset your password</a></p>
+            <p>This link will expire in 15 minutes.</p>
+        `;
+
+        try {
+            await sendEmail({
+                to: user.email,
+                subject,
+                text,
+                html,
+            });
+        } catch (mailError) {
+            await prisma.user.update({
+                where: { id: user.id },
+                data: {
+                    resetPasswordToken: null,
+                    resetPasswordExpires: null,
+                },
+            });
+
+            return res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
+                success: false,
+                status: StatusCodes.INTERNAL_SERVER_ERROR,
+                message: isDev
+                    ? `Failed to send reset email: ${mailError?.message || "Unknown error"}`
+                    : "Failed to send reset email. Please try again later.",
+            });
+        }
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            message: isDev
+                ? `Reset link sent to ${user.email}.`
+                : "If the email exists, a reset link has been sent.",
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const resetPassword = async (req, res, next) => {
+    try {
+        const parsed = resetPasswordSchema.parse(req.body);
+
+        const hashedToken = crypto.createHash("sha256").update(parsed.token).digest("hex");
+
+        const user = await prisma.user.findFirst({
+            where: {
+                resetPasswordToken: hashedToken,
+                resetPasswordExpires: {
+                    gt: new Date(),
+                },
+            },
+        });
+
+        if (!user) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Invalid or expired reset token.",
+            });
+        }
+
+        const hashedPassword = await bcrypt.hash(parsed.password, 10);
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                password: hashedPassword,
+                resetPasswordToken: null,
+                resetPasswordExpires: null,
+            },
+        });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            message: "Password reset successful.",
         });
     } catch (error) {
         next(error);
