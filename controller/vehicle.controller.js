@@ -31,6 +31,16 @@ const assertOptionTypes = (parsed, optionsById) => {
     return null;
 };
 
+const ensureModelMatchesBrand = (parsed, optionsById) => {
+    const brand = optionsById.get(parsed.brandId);
+    const model = optionsById.get(parsed.modelId);
+    if (!brand || !model) return "Invalid brand or model option.";
+    if (model.parentId !== brand.id) {
+        return "Model does not belong to the selected brand.";
+    }
+    return null;
+};
+
 export const createVehicle = async (req, res, next) => {
     try {
         const parsed = createVehicleSchema.parse(req.body);
@@ -68,6 +78,14 @@ export const createVehicle = async (req, res, next) => {
                 message: optionError,
             });
         }
+        const modelError = ensureModelMatchesBrand(parsed, optionsById);
+        if (modelError) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: modelError,
+            });
+        }
 
         const vehicle = await prisma.vehicle.create({
             data: {
@@ -101,6 +119,7 @@ export const createVehicle = async (req, res, next) => {
 export const getVehicleOptions = async (req, res, next) => {
     try {
         const type = req.query.type ? String(req.query.type).toUpperCase() : null;
+        const parentId = req.query.parentId ? Number(req.query.parentId) : null;
         if (type) {
             const parsedType = vehicleOptionTypeEnum.safeParse(type);
             if (!parsedType.success) {
@@ -111,10 +130,18 @@ export const getVehicleOptions = async (req, res, next) => {
                 });
             }
         }
+        if (req.query.parentId && (!Number.isInteger(parentId) || parentId <= 0)) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Invalid parentId.",
+            });
+        }
 
         const options = await prisma.vehicleOption.findMany({
             where: {
                 ...(type ? { type } : {}),
+                ...(parentId ? { parentId } : {}),
                 isActive: true,
             },
             orderBy: { value: "asc" },
@@ -176,10 +203,37 @@ export const createVehicleOption = async (req, res, next) => {
     try {
         const parsed = createVehicleOptionSchema.parse(req.body);
 
+        if (parsed.type === "MODEL") {
+            if (!parsed.parentId) {
+                return res.status(StatusCodes.BAD_REQUEST).json({
+                    success: false,
+                    status: StatusCodes.BAD_REQUEST,
+                    message: "MODEL options require parentId (brand).",
+                });
+            }
+            const parent = await prisma.vehicleOption.findFirst({
+                where: { id: parsed.parentId, type: "BRAND", isActive: true },
+            });
+            if (!parent) {
+                return res.status(StatusCodes.BAD_REQUEST).json({
+                    success: false,
+                    status: StatusCodes.BAD_REQUEST,
+                    message: "parentId must reference an active BRAND option.",
+                });
+            }
+        } else if (parsed.parentId) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "parentId is only allowed for MODEL options.",
+            });
+        }
+
         const option = await prisma.vehicleOption.create({
             data: {
                 type: parsed.type,
                 value: parsed.value,
+                parentId: parsed.parentId || null,
             },
         });
 

@@ -27,6 +27,7 @@ export const createVehicleSchema = z.object({
 export const createVehicleOptionSchema = z.object({
     type: vehicleOptionTypeEnum,
     value: z.string().trim().min(1).max(100),
+    parentId: z.coerce.number().int().positive().optional(),
 });
 
 export const updateVehicleOptionSchema = z.object({
