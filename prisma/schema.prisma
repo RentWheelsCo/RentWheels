@@ -26,4 +26,52 @@ model User {
   createdAt    DateTime @default(now())
   resetPasswordToken   String?
   resetPasswordExpires DateTime?
+  vehicles     Vehicle[]
+}
+
+model VehicleOption {
+  id        Int      @id @default(autoincrement())
+  type      String
+  value     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vehiclesAsType         Vehicle[] @relation("VehicleType")
+  vehiclesAsBrand        Vehicle[] @relation("VehicleBrand")
+  vehiclesAsModel        Vehicle[] @relation("VehicleModel")
+  vehiclesAsCategory     Vehicle[] @relation("VehicleCategory")
+  vehiclesAsTransmission Vehicle[] @relation("VehicleTransmission")
+  vehiclesAsFuelType     Vehicle[] @relation("VehicleFuelType")
+  vehiclesAsLocation     Vehicle[] @relation("VehicleLocation")
+
+  @@unique([type, value])
+}
+
+model Vehicle {
+  id              Int           @id @default(autoincrement())
+  ownerId         Int
+  typeId          Int
+  brandId         Int
+  modelId         Int
+  categoryId      Int
+  transmissionId  Int
+  fuelTypeId      Int
+  locationId      Int
+  year            Int
+  dailyPrice      Float
+  seatingCapacity Int
+  description     String?
+  photos          String[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  owner        User          @relation(fields: [ownerId], references: [id])
+  type         VehicleOption @relation("VehicleType", fields: [typeId], references: [id])
+  brand        VehicleOption @relation("VehicleBrand", fields: [brandId], references: [id])
+  model        VehicleOption @relation("VehicleModel", fields: [modelId], references: [id])
+  category     VehicleOption @relation("VehicleCategory", fields: [categoryId], references: [id])
+  transmission VehicleOption @relation("VehicleTransmission", fields: [transmissionId], references: [id])
+  fuelType     VehicleOption @relation("VehicleFuelType", fields: [fuelTypeId], references: [id])
+  location     VehicleOption @relation("VehicleLocation", fields: [locationId], references: [id])
 }

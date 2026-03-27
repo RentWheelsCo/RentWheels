@@ -11,8 +11,9 @@ cloudinary.config({
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: async (req, file) => {
+        const folder = file.fieldname === "vehiclePhotos" ? "vehicles" : "users";
         return {
-            folder: "users",               
+            folder,
             resource_type: "image",
             public_id: `${Date.now()}-${file.originalname}`,
         };
@@ -38,3 +39,5 @@ export const uploadFields = upload.fields([
     { name: "profilePhoto", maxCount: 1 },
     { name: "licensePhoto", maxCount: 2 },
 ]);
+
+export const uploadVehiclePhotos = upload.array("vehiclePhotos", 10);
