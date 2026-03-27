@@ -36,6 +36,10 @@ model VehicleOption {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  parentId  Int?
+
+  parent    VehicleOption? @relation("VehicleOptionParent", fields: [parentId], references: [id])
+  children  VehicleOption[] @relation("VehicleOptionParent")
 
   vehiclesAsType         Vehicle[] @relation("VehicleType")
   vehiclesAsBrand        Vehicle[] @relation("VehicleBrand")
