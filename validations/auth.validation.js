@@ -27,3 +27,10 @@ export const resetPasswordSchema = z.object({
     token: z.string().min(1, "Token is required"),
     password: passwordSchema,
 });
+
+export const adminCreateUserSchema = z.object({
+    name: z.string().min(2, "Name must be at least 2 characters"),
+    email: z.string().email("Invalid email format"),
+    password: passwordSchema,
+    role: z.enum(["user", "admin"]).optional(),
+});

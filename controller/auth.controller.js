@@ -2,7 +2,7 @@ import prisma from "../utils/db.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { StatusCodes } from "http-status-codes";
-import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from "../validations/auth.validation.js";
+import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema, adminCreateUserSchema } from "../validations/auth.validation.js";
 import crypto from 'crypto';
 import { OAuth2Client } from "google-auth-library";
 import { sendEmail } from "../utils/email.js";
@@ -391,6 +391,51 @@ export const uploadUserDocuments = async (req, res, next) => {
                 id: user.id,
                 profilePhoto: user.profilePhoto,
                 licensePhoto: user.licensePhoto ? JSON.parse(user.licensePhoto) : null,
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const adminCreateUser = async (req, res, next) => {
+    try {
+        const parsed = adminCreateUserSchema.parse(req.body);
+
+        const existingUser = await prisma.user.findUnique({
+            where: { email: parsed.email },
+        });
+
+        if (existingUser) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Email already exists",
+            });
+        }
+
+        const hashedPassword = await bcrypt.hash(parsed.password, 10);
+
+        const user = await prisma.user.create({
+            data: {
+                name: parsed.name,
+                email: parsed.email,
+                password: hashedPassword,
+                role: parsed.role || "user",
+                isVerified: true,
+            },
+        });
+
+        return res.status(StatusCodes.CREATED).json({
+            success: true,
+            status: StatusCodes.CREATED,
+            message: "User created successfully",
+            data: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                isVerified: user.isVerified,
             },
         });
     } catch (error) {
