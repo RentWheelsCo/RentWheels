@@ -15,8 +15,8 @@ const router = express.Router();
 router.get("/", getVehicles);
 router.post("/", authMiddleware, uploadVehiclePhotos, createVehicle);
 router.get("/options", getVehicleOptions);
-router.post("/options", authMiddleware, authorizeRoles("superadmin"), createVehicleOption);
-router.patch("/options/:id", authMiddleware, authorizeRoles("superadmin"), updateVehicleOption);
-router.delete("/options/:id", authMiddleware, authorizeRoles("superadmin"), deactivateVehicleOption);
+router.post("/options", authMiddleware, authorizeRoles("admin"), createVehicleOption);
+router.patch("/options/:id", authMiddleware, authorizeRoles("admin"), updateVehicleOption);
+router.delete("/options/:id", authMiddleware, authorizeRoles("admin"), deactivateVehicleOption);
 
 export default router;

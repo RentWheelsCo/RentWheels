@@ -12,7 +12,7 @@ router.post("/google", validateGoogleLogin, googleLogin);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
 router.patch("/documents", authMiddleware, uploadFields, uploadUserDocuments);
-router.post("/admin/users", authMiddleware, authorizeRoles("superadmin"), adminCreateUser);
+router.post("/admin/users", authMiddleware, authorizeRoles("admin"), adminCreateUser);
 
 router.get("/profile", authMiddleware, getProfile);
 

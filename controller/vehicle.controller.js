@@ -160,6 +160,13 @@ export const getVehicleOptions = async (req, res, next) => {
 export const getVehicles = async (req, res, next) => {
     try {
         const parsed = listVehiclesSchema.parse(req.query);
+        const hasDateFilter = Boolean(parsed.pickupDate || parsed.returnDate);
+        const pickupDate = hasDateFilter
+            ? new Date(parsed.pickupDate || parsed.returnDate)
+            : null;
+        const returnDate = hasDateFilter
+            ? new Date(parsed.returnDate || parsed.pickupDate)
+            : null;
 
         const where = {};
         if (parsed.minPrice !== undefined || parsed.maxPrice !== undefined) {
@@ -185,13 +192,40 @@ export const getVehicles = async (req, res, next) => {
             },
         });
 
+        let bookedSet = new Set();
+        if (hasDateFilter && pickupDate && returnDate) {
+            const vehicleIds = vehicles.map((vehicle) => vehicle.id);
+            const overlapping = await prisma.booking.findMany({
+                where: {
+                    vehicleId: { in: vehicleIds },
+                    status: { not: "CANCELLED" },
+                    AND: [
+                        { pickupDate: { lte: returnDate } },
+                        { returnDate: { gte: pickupDate } },
+                    ],
+                },
+                select: { vehicleId: true },
+            });
+            bookedSet = new Set(overlapping.map((b) => b.vehicleId));
+        }
+
+        const vehiclesWithAvailability = vehicles.map((vehicle) => ({
+            ...vehicle,
+            isAvailable: hasDateFilter ? !bookedSet.has(vehicle.id) : null,
+            availabilityStatus: hasDateFilter
+                ? bookedSet.has(vehicle.id)
+                    ? "NOT_AVAILABLE"
+                    : "AVAILABLE"
+                : "UNKNOWN",
+        }));
+
         return res.status(StatusCodes.OK).json({
             success: true,
             status: StatusCodes.OK,
             data: {
                 pickupDate: parsed.pickupDate || null,
                 returnDate: parsed.returnDate || null,
-                vehicles,
+                vehicles: vehiclesWithAvailability,
             },
         });
     } catch (error) {
