@@ -12,6 +12,7 @@ export const registerSchema = z.object({
     email: z.string().email("Invalid email format"),
 
     password: passwordSchema,
+    phone: z.string().trim().min(7).max(20),
 });
 
 export const loginSchema = z.object({
@@ -33,4 +34,5 @@ export const adminCreateUserSchema = z.object({
     email: z.string().email("Invalid email format"),
     password: passwordSchema,
     role: z.enum(["user", "admin"]).optional(),
+    phone: z.string().trim().min(7).max(20).optional(),
 });

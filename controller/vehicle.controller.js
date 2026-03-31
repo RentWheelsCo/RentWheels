@@ -2,6 +2,7 @@ import prisma from "../utils/db.js";
 import { StatusCodes } from "http-status-codes";
 import {
     createVehicleSchema,
+    updateVehicleSchema,
     listVehiclesSchema,
     createVehicleOptionSchema,
     updateVehicleOptionSchema,
@@ -226,6 +227,279 @@ export const getVehicles = async (req, res, next) => {
                 pickupDate: parsed.pickupDate || null,
                 returnDate: parsed.returnDate || null,
                 vehicles: vehiclesWithAvailability,
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getVehicleById = async (req, res, next) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Invalid vehicle id.",
+            });
+        }
+
+        const vehicle = await prisma.vehicle.findUnique({
+            where: { id },
+            include: {
+                type: true,
+                brand: true,
+                model: true,
+                category: true,
+                transmission: true,
+                fuelType: true,
+                location: true,
+                owner: {
+                    select: { id: true, name: true, email: true, phone: true },
+                },
+            },
+        });
+
+        if (!vehicle) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "Vehicle not found.",
+            });
+        }
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            data: vehicle,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getMyVehicles = async (req, res, next) => {
+    try {
+        const vehicles = await prisma.vehicle.findMany({
+            where: { ownerId: req.user.id },
+            orderBy: { createdAt: "desc" },
+            include: {
+                type: true,
+                brand: true,
+                model: true,
+                category: true,
+                transmission: true,
+                fuelType: true,
+                location: true,
+                owner: {
+                    select: { id: true, name: true, email: true, phone: true },
+                },
+            },
+        });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            data: vehicles,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const canManageVehicle = (req, vehicle) =>
+    req.user?.role === "admin" || vehicle.ownerId === req.user?.id;
+
+export const updateVehicle = async (req, res, next) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Invalid vehicle id.",
+            });
+        }
+
+        const parsed = updateVehicleSchema.parse(req.body);
+        if (Object.keys(parsed).length === 0) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "No fields provided to update.",
+            });
+        }
+
+        const existing = await prisma.vehicle.findUnique({ where: { id } });
+        if (!existing) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "Vehicle not found.",
+            });
+        }
+        if (!canManageVehicle(req, existing)) {
+            return res.status(StatusCodes.FORBIDDEN).json({
+                success: false,
+                status: StatusCodes.FORBIDDEN,
+                message: "You can only manage your own vehicles.",
+            });
+        }
+
+        const optionFields = [
+            "typeId",
+            "brandId",
+            "modelId",
+            "categoryId",
+            "transmissionId",
+            "fuelTypeId",
+            "locationId",
+        ];
+        const isUpdatingOptions = optionFields.some((field) => parsed[field] !== undefined);
+        if (isUpdatingOptions) {
+            const mergedOptionIds = {
+                typeId: parsed.typeId ?? existing.typeId,
+                brandId: parsed.brandId ?? existing.brandId,
+                modelId: parsed.modelId ?? existing.modelId,
+                categoryId: parsed.categoryId ?? existing.categoryId,
+                transmissionId: parsed.transmissionId ?? existing.transmissionId,
+                fuelTypeId: parsed.fuelTypeId ?? existing.fuelTypeId,
+                locationId: parsed.locationId ?? existing.locationId,
+            };
+
+            const optionIds = Object.values(mergedOptionIds);
+            const options = await prisma.vehicleOption.findMany({
+                where: {
+                    id: { in: optionIds },
+                    isActive: true,
+                },
+            });
+            const optionsById = new Map(options.map((opt) => [opt.id, opt]));
+
+            const optionError = assertOptionTypes(mergedOptionIds, optionsById);
+            if (optionError) {
+                return res.status(StatusCodes.BAD_REQUEST).json({
+                    success: false,
+                    status: StatusCodes.BAD_REQUEST,
+                    message: optionError,
+                });
+            }
+            const modelError = ensureModelMatchesBrand(mergedOptionIds, optionsById);
+            if (modelError) {
+                return res.status(StatusCodes.BAD_REQUEST).json({
+                    success: false,
+                    status: StatusCodes.BAD_REQUEST,
+                    message: modelError,
+                });
+            }
+        }
+
+        const vehicle = await prisma.vehicle.update({
+            where: { id },
+            data: {
+                ...parsed,
+            },
+        });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            message: "Vehicle updated successfully.",
+            data: vehicle,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const deleteVehicle = async (req, res, next) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Invalid vehicle id.",
+            });
+        }
+
+        const vehicle = await prisma.vehicle.findUnique({ where: { id } });
+        if (!vehicle) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "Vehicle not found.",
+            });
+        }
+        if (!canManageVehicle(req, vehicle)) {
+            return res.status(StatusCodes.FORBIDDEN).json({
+                success: false,
+                status: StatusCodes.FORBIDDEN,
+                message: "You can only manage your own vehicles.",
+            });
+        }
+
+        const bookingCount = await prisma.booking.count({
+            where: { vehicleId: id, status: { not: "CANCELLED" } },
+        });
+        if (bookingCount > 0) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Vehicle has active bookings and cannot be deleted.",
+            });
+        }
+
+        await prisma.vehicle.delete({ where: { id } });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            message: "Vehicle deleted successfully.",
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getVehicleOwnerContact = async (req, res, next) => {
+    try {
+        const vehicleId = Number(req.params.id);
+        if (!Number.isInteger(vehicleId) || vehicleId <= 0) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Invalid vehicle id.",
+            });
+        }
+
+        const vehicle = await prisma.vehicle.findUnique({
+            where: { id: vehicleId },
+            include: {
+                owner: {
+                    select: { id: true, name: true, email: true, phone: true },
+                },
+            },
+        });
+
+        if (!vehicle) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "Vehicle not found.",
+            });
+        }
+
+        const owner = vehicle.owner;
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            data: {
+                ownerId: owner.id,
+                name: owner.name,
+                email: owner.email,
+                phone: owner.phone || null,
             },
         });
     } catch (error) {

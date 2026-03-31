@@ -54,6 +54,7 @@ export const register = async (req, res, next) => {
                 name: parsed.name,
                 email: parsed.email,
                 password: hashedPassword,
+                phone: parsed.phone,
                 profilePhoto,
                 licensePhoto: licensePhoto ? JSON.stringify(licensePhoto) : null,
             },
@@ -423,6 +424,7 @@ export const adminCreateUser = async (req, res, next) => {
                 password: hashedPassword,
                 role: parsed.role || "user",
                 isVerified: true,
+                phone: parsed.phone || null,
             },
         });
 

@@ -24,6 +24,20 @@ export const createVehicleSchema = z.object({
     description: z.string().trim().max(2000).optional(),
 });
 
+export const updateVehicleSchema = z.object({
+    typeId: z.coerce.number().int().positive().optional(),
+    brandId: z.coerce.number().int().positive().optional(),
+    modelId: z.coerce.number().int().positive().optional(),
+    categoryId: z.coerce.number().int().positive().optional(),
+    transmissionId: z.coerce.number().int().positive().optional(),
+    fuelTypeId: z.coerce.number().int().positive().optional(),
+    locationId: z.coerce.number().int().positive().optional(),
+    year: z.coerce.number().int().min(1900).max(2100).optional(),
+    dailyPrice: z.coerce.number().positive().optional(),
+    seatingCapacity: z.coerce.number().int().positive().optional(),
+    description: z.string().trim().max(2000).optional(),
+});
+
 export const createVehicleOptionSchema = z.object({
     type: vehicleOptionTypeEnum,
     value: z.string().trim().min(1).max(100),
