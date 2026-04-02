@@ -29,6 +29,8 @@ model User {
   resetPasswordExpires DateTime?
   vehicles     Vehicle[]
   bookings     Booking[]
+  comments     Comment[]
+  commentLikes CommentLike[]
 }
 
 model VehicleOption {
@@ -81,6 +83,7 @@ model Vehicle {
   fuelType     VehicleOption @relation("VehicleFuelType", fields: [fuelTypeId], references: [id])
   location     VehicleOption @relation("VehicleLocation", fields: [locationId], references: [id])
   bookings     Booking[]
+  comments     Comment[]
 }
 
 model Booking {
@@ -99,4 +102,37 @@ model Booking {
 
   @@index([vehicleId, pickupDate, returnDate])
   @@index([renterId])
+}
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  vehicleId Int
+  userId    Int
+  parentId  Int?
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent  Comment? @relation("CommentThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies Comment[] @relation("CommentThread")
+  likes   CommentLike[]
+
+  @@index([vehicleId, createdAt])
+  @@index([parentId, createdAt])
+  @@index([userId])
+}
+
+model CommentLike {
+  id        Int      @id @default(autoincrement())
+  commentId Int
+  userId    Int
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
+  @@index([userId])
 }
