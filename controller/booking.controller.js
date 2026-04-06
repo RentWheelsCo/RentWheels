@@ -1,6 +1,7 @@
 import prisma from "../utils/db.js";
 import { StatusCodes } from "http-status-codes";
 import { createBookingSchema, availabilityQuerySchema } from "../validations/booking.validation.js";
+import { notifyUser } from "../utils/notification.js";
 
 const normalizeAvailabilityRange = (query) => {
     const parsed = availabilityQuerySchema.parse(query);
@@ -42,7 +43,10 @@ export const createBooking = async (req, res, next) => {
         const vehicle = await prisma.vehicle.findUnique({
             where: { id: parsed.vehicleId },
             include: {
-                owner: { select: { id: true, name: true } },
+                owner: { select: { id: true, name: true, email: true } },
+                type: true,
+                brand: true,
+                model: true,
             },
         });
 
@@ -93,6 +97,36 @@ export const createBooking = async (req, res, next) => {
                 insuranceType: parsed.insuranceType,
             },
         });
+
+        try {
+            const renter = await prisma.user.findUnique({
+                where: { id: req.user.id },
+                select: { id: true, name: true, email: true },
+            });
+            const vehicleName = buildVehicleName(vehicle);
+            const pickupLabel = pickupDate.toISOString().split("T")[0];
+            const returnLabel = returnDate.toISOString().split("T")[0];
+
+            if (vehicle.ownerId !== req.user.id) {
+                await notifyUser({
+                    userId: vehicle.ownerId,
+                    type: "BOOKING_CREATED",
+                    title: "New booking received",
+                    message: `${renter?.name || "A renter"} booked your ${vehicleName} from ${pickupLabel} to ${returnLabel}.`,
+                    email: vehicle.owner?.email || null,
+                });
+            }
+
+            await notifyUser({
+                userId: req.user.id,
+                type: "BOOKING_CONFIRMED",
+                title: "Booking confirmed",
+                message: `Your booking for ${vehicleName} is confirmed from ${pickupLabel} to ${returnLabel}.`,
+                email: renter?.email || null,
+            });
+        } catch (notifyError) {
+            console.error("Failed to send booking notifications:", notifyError?.message || notifyError);
+        }
 
         return res.status(StatusCodes.CREATED).json({
             success: true,

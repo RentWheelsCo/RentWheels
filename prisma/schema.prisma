@@ -31,6 +31,7 @@ model User {
   bookings     Booking[]
   comments     Comment[]
   commentLikes CommentLike[]
+  notifications Notification[]
 }
 
 model VehicleOption {
@@ -135,4 +136,19 @@ model CommentLike {
 
   @@unique([commentId, userId])
   @@index([userId])
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  type      String
+  title     String
+  message   String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, isRead])
 }

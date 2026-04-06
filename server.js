@@ -1,9 +1,11 @@
 import dotenv from 'dotenv/config';
 import express from 'express';
+import http from "http";
 import cors from 'cors';
 import prisma from "./utils/db.js";
 import mainRouter from "./routes/index.routes.js";
 import { errorMiddleware } from './middlewares/error.middleware.js';
+import { initSocket } from "./utils/socket.js";
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -20,7 +22,9 @@ async function startServer() {
     try {
         await prisma.$connect();
         console.log("Database connected successfully!");
-        app.listen(PORT, () => console.log(`Server is running on Port ${PORT}`));
+        const server = http.createServer(app);
+        initSocket(server);
+        server.listen(PORT, () => console.log(`Server is running on Port ${PORT}`));
     } catch (error) {
         console.error("Failed to connect to the database:", error);
         process.exit(1);

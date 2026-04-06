@@ -5,6 +5,7 @@ import {
     replyCommentSchema,
     listCommentsSchema,
 } from "../validations/comment.validation.js";
+import { notifyUser } from "../utils/notification.js";
 
 const selectUser = {
     id: true,
@@ -29,7 +30,11 @@ export const createComment = async (req, res, next) => {
 
         const vehicle = await prisma.vehicle.findUnique({
             where: { id: parsed.vehicleId },
-            select: { id: true },
+            select: {
+                id: true,
+                ownerId: true,
+                owner: { select: { email: true, name: true } },
+            },
         });
         if (!vehicle) {
             return res.status(StatusCodes.NOT_FOUND).json({
@@ -73,6 +78,20 @@ export const createComment = async (req, res, next) => {
             },
         });
 
+        if (vehicle.ownerId !== req.user.id) {
+            try {
+                await notifyUser({
+                    userId: vehicle.ownerId,
+                    type: "COMMENT_CREATED",
+                    title: "New comment on your vehicle",
+                    message: `${comment.user?.name || "Someone"} commented on your vehicle.`,
+                    email: vehicle.owner?.email || null,
+                });
+            } catch (notifyError) {
+                console.error("Failed to send comment notification:", notifyError?.message || notifyError);
+            }
+        }
+
         return res.status(StatusCodes.CREATED).json({
             success: true,
             status: StatusCodes.CREATED,
@@ -99,7 +118,7 @@ export const replyToComment = async (req, res, next) => {
 
         const parent = await prisma.comment.findUnique({
             where: { id: parentId },
-            select: { id: true, vehicleId: true },
+            select: { id: true, vehicleId: true, userId: true },
         });
         if (!parent) {
             return res.status(StatusCodes.NOT_FOUND).json({
@@ -121,6 +140,19 @@ export const replyToComment = async (req, res, next) => {
                 _count: { select: { likes: true, replies: true } },
             },
         });
+
+        if (parent.userId !== req.user.id) {
+            try {
+                await notifyUser({
+                    userId: parent.userId,
+                    type: "COMMENT_REPLY",
+                    title: "New reply to your comment",
+                    message: `${reply.user?.name || "Someone"} replied to your comment.`,
+                });
+            } catch (notifyError) {
+                console.error("Failed to send reply notification:", notifyError?.message || notifyError);
+            }
+        }
 
         return res.status(StatusCodes.CREATED).json({
             success: true,
@@ -206,7 +238,7 @@ export const likeComment = async (req, res, next) => {
 
         const comment = await prisma.comment.findUnique({
             where: { id: commentId },
-            select: { id: true },
+            select: { id: true, userId: true },
         });
         if (!comment) {
             return res.status(StatusCodes.NOT_FOUND).json({
@@ -239,6 +271,19 @@ export const likeComment = async (req, res, next) => {
                 userId: req.user.id,
             },
         });
+
+        if (comment.userId !== req.user.id) {
+            try {
+                await notifyUser({
+                    userId: comment.userId,
+                    type: "COMMENT_LIKED",
+                    title: "Your comment got a like",
+                    message: "Someone liked your comment.",
+                });
+            } catch (notifyError) {
+                console.error("Failed to send like notification:", notifyError?.message || notifyError);
+            }
+        }
 
         return res.status(StatusCodes.OK).json({
             success: true,
