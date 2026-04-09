@@ -3,6 +3,13 @@ import { StatusCodes } from "http-status-codes";
 import { createBookingSchema, availabilityQuerySchema } from "../validations/booking.validation.js";
 import { notifyUser } from "../utils/notification.js";
 
+const parsePositiveInt = (value, fallback) => {
+    if (value === undefined || value === null || value === "") return fallback;
+    const num = Number.parseInt(value, 10);
+    if (Number.isNaN(num) || num <= 0) return fallback;
+    return num;
+};
+
 const normalizeAvailabilityRange = (query) => {
     const parsed = availabilityQuerySchema.parse(query);
     if (!parsed.pickupDate && !parsed.returnDate) return null;
@@ -141,9 +148,17 @@ export const createBooking = async (req, res, next) => {
 
 export const getMyBookings = async (req, res, next) => {
     try {
+        const page = parsePositiveInt(req.query.page, 1);
+        const limit = Math.min(parsePositiveInt(req.query.limit, 20), 50);
+        const skip = (page - 1) * limit;
+
+        const where = { renterId: req.user.id };
+
         const bookings = await prisma.booking.findMany({
-            where: { renterId: req.user.id },
+            where,
             orderBy: { createdAt: "desc" },
+            skip,
+            take: limit,
             include: {
                 vehicle: {
                     include: {
@@ -181,7 +196,11 @@ export const getMyBookings = async (req, res, next) => {
         return res.status(StatusCodes.OK).json({
             success: true,
             status: StatusCodes.OK,
-            data,
+            data: {
+                page,
+                limit,
+                bookings: data,
+            },
         });
     } catch (error) {
         next(error);

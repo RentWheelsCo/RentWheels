@@ -54,6 +54,8 @@ export const listVehiclesSchema = z.object({
     maxPrice: z.coerce.number().nonnegative().optional(),
     pickupDate: z.string().optional(),
     returnDate: z.string().optional(),
+    page: z.coerce.number().int().positive().optional(),
+    limit: z.coerce.number().int().positive().optional(),
 }).refine((data) => {
     if (data.minPrice !== undefined && data.maxPrice !== undefined) {
         return data.minPrice <= data.maxPrice;

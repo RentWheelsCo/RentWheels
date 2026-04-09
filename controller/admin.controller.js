@@ -3,6 +3,13 @@ import bcrypt from "bcryptjs";
 import { StatusCodes } from "http-status-codes";
 import { adminCreateUserSchema, adminUpdateUserSchema } from "../validations/auth.validation.js";
 
+const parsePositiveInt = (value, fallback) => {
+    if (value === undefined || value === null || value === "") return fallback;
+    const num = Number.parseInt(value, 10);
+    if (Number.isNaN(num) || num <= 0) return fallback;
+    return num;
+};
+
 export const adminCreateUser = async (req, res, next) => {
     try {
         const parsed = adminCreateUserSchema.parse(req.body);
@@ -182,8 +189,14 @@ export const adminDeleteUser = async (req, res, next) => {
 
 export const adminGetAllUsers = async (req, res, next) => {
     try {
+        const page = parsePositiveInt(req.query.page, 1);
+        const limit = Math.min(parsePositiveInt(req.query.limit, 20), 50);
+        const skip = (page - 1) * limit;
+
         const users = await prisma.user.findMany({
             orderBy: { createdAt: "desc" },
+            skip,
+            take: limit,
             select: {
                 id: true,
                 name: true,
@@ -206,7 +219,11 @@ export const adminGetAllUsers = async (req, res, next) => {
         return res.status(StatusCodes.OK).json({
             success: true,
             status: StatusCodes.OK,
-            data: users,
+            data: {
+                page,
+                limit,
+                users,
+            },
         });
     } catch (error) {
         next(error);

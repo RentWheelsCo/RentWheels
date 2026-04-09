@@ -19,6 +19,13 @@ const REQUIRED_OPTION_TYPES = {
     locationId: "LOCATION",
 };
 
+const parsePositiveInt = (value, fallback) => {
+    if (value === undefined || value === null || value === "") return fallback;
+    const num = Number.parseInt(value, 10);
+    if (Number.isNaN(num) || num <= 0) return fallback;
+    return num;
+};
+
 const assertOptionTypes = (parsed, optionsById) => {
     for (const [field, expectedType] of Object.entries(REQUIRED_OPTION_TYPES)) {
         const option = optionsById.get(parsed[field]);
@@ -121,6 +128,9 @@ export const getVehicleOptions = async (req, res, next) => {
     try {
         const type = req.query.type ? String(req.query.type).toUpperCase() : null;
         const parentId = req.query.parentId ? Number(req.query.parentId) : null;
+        const page = parsePositiveInt(req.query.page, 1);
+        const limit = Math.min(parsePositiveInt(req.query.limit, 20), 50);
+        const skip = (page - 1) * limit;
         if (type) {
             const parsedType = vehicleOptionTypeEnum.safeParse(type);
             if (!parsedType.success) {
@@ -139,19 +149,27 @@ export const getVehicleOptions = async (req, res, next) => {
             });
         }
 
+        const where = {
+            ...(type ? { type } : {}),
+            ...(parentId ? { parentId } : {}),
+            isActive: true,
+        };
+
         const options = await prisma.vehicleOption.findMany({
-            where: {
-                ...(type ? { type } : {}),
-                ...(parentId ? { parentId } : {}),
-                isActive: true,
-            },
+            where,
             orderBy: { value: "asc" },
+            skip,
+            take: limit,
         });
 
         return res.status(StatusCodes.OK).json({
             success: true,
             status: StatusCodes.OK,
-            data: options,
+            data: {
+                page,
+                limit,
+                options,
+            },
         });
     } catch (error) {
         next(error);
@@ -161,6 +179,9 @@ export const getVehicleOptions = async (req, res, next) => {
 export const getVehicles = async (req, res, next) => {
     try {
         const parsed = listVehiclesSchema.parse(req.query);
+        const page = parsePositiveInt(parsed.page, 1);
+        const limit = Math.min(parsePositiveInt(parsed.limit, 20), 50);
+        const skip = (page - 1) * limit;
         const hasDateFilter = Boolean(parsed.pickupDate || parsed.returnDate);
         const pickupDate = hasDateFilter
             ? new Date(parsed.pickupDate || parsed.returnDate)
@@ -179,6 +200,8 @@ export const getVehicles = async (req, res, next) => {
         const vehicles = await prisma.vehicle.findMany({
             where,
             orderBy: { createdAt: "desc" },
+            skip,
+            take: limit,
             include: {
                 type: true,
                 brand: true,
@@ -226,6 +249,8 @@ export const getVehicles = async (req, res, next) => {
             data: {
                 pickupDate: parsed.pickupDate || null,
                 returnDate: parsed.returnDate || null,
+                page,
+                limit,
                 vehicles: vehiclesWithAvailability,
             },
         });
@@ -281,9 +306,16 @@ export const getVehicleById = async (req, res, next) => {
 
 export const getMyVehicles = async (req, res, next) => {
     try {
+        const page = parsePositiveInt(req.query.page, 1);
+        const limit = Math.min(parsePositiveInt(req.query.limit, 20), 50);
+        const skip = (page - 1) * limit;
+
+        const where = { ownerId: req.user.id };
         const vehicles = await prisma.vehicle.findMany({
-            where: { ownerId: req.user.id },
+            where,
             orderBy: { createdAt: "desc" },
+            skip,
+            take: limit,
             include: {
                 type: true,
                 brand: true,
@@ -301,7 +333,11 @@ export const getMyVehicles = async (req, res, next) => {
         return res.status(StatusCodes.OK).json({
             success: true,
             status: StatusCodes.OK,
-            data: vehicles,
+            data: {
+                page,
+                limit,
+                vehicles,
+            },
         });
     } catch (error) {
         next(error);
