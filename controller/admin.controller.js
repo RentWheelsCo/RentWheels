@@ -202,17 +202,15 @@ export const adminGetAllUsers = async (req, res, next) => {
                 name: true,
                 email: true,
                 phone: true,
-                profilePhoto: true,
-                licensePhoto: true,
                 role: true,
-                googleId: true,
                 isVerified: true,
                 createdAt: true,
-                vehicles: true,
-                bookings: true,
-                comments: true,
-                notifications: true,
-                commentLikes: true,
+                _count: {
+                    select: {
+                        vehicles: true,
+                        bookings: true,
+                    },
+                },
             },
         });
 
@@ -222,8 +220,65 @@ export const adminGetAllUsers = async (req, res, next) => {
             data: {
                 page,
                 limit,
-                users,
+                users: users.map((user) => ({
+                    id: user.id,
+                    name: user.name,
+                    email: user.email,
+                    phone: user.phone,
+                    role: user.role,
+                    isVerified: user.isVerified,
+                    createdAt: user.createdAt,
+                    vehiclesCount: user._count?.vehicles ?? 0,
+                    bookingsCount: user._count?.bookings ?? 0,
+                })),
             },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const adminGetUserById = async (req, res, next) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Invalid user id.",
+            });
+        }
+
+        const user = await prisma.user.findUnique({
+            where: { id },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true,
+                profilePhoto: true,
+                licensePhoto: true,
+                role: true,
+                googleId: true,
+                isVerified: true,
+                createdAt: true,
+                bookings: true,
+                vehicles: true,
+            },
+        });
+
+        if (!user) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "User not found",
+            });
+        }
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            data: user,
         });
     } catch (error) {
         next(error);

@@ -1,6 +1,6 @@
 import express from "express";
 import { register, login, getProfile, googleLogin, forgotPassword, resetPassword, uploadUserDocuments } from "../controller/auth.controller.js";
-import { adminCreateUser, adminUpdateUser, adminDeleteUser, adminGetAllUsers } from "../controller/admin.controller.js";
+import { adminCreateUser, adminUpdateUser, adminDeleteUser, adminGetAllUsers, adminGetUserById } from "../controller/admin.controller.js";
 import { authMiddleware, authorizeRoles } from "../middlewares/auth.middleware.js";
 import { uploadFields } from "../middlewares/upload.middleware.js";
 import { validateGoogleLogin } from "../middlewares/validateGoogleLogin.middleware.js";
@@ -15,6 +15,7 @@ router.post("/reset-password", resetPassword);
 router.patch("/documents", authMiddleware, uploadFields, uploadUserDocuments);
 router.post("/admin/users", authMiddleware, authorizeRoles("admin"), adminCreateUser);
 router.get("/admin/users", authMiddleware, authorizeRoles("admin"), adminGetAllUsers);
+router.get("/admin/users/:id", authMiddleware, authorizeRoles("admin"), adminGetUserById);
 router.patch("/admin/users/:id", authMiddleware, authorizeRoles("admin"), adminUpdateUser);
 router.delete("/admin/users/:id", authMiddleware, authorizeRoles("admin"), adminDeleteUser);
 
