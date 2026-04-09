@@ -179,3 +179,36 @@ export const adminDeleteUser = async (req, res, next) => {
         next(error);
     }
 };
+
+export const adminGetAllUsers = async (req, res, next) => {
+    try {
+        const users = await prisma.user.findMany({
+            orderBy: { createdAt: "desc" },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true,
+                profilePhoto: true,
+                licensePhoto: true,
+                role: true,
+                googleId: true,
+                isVerified: true,
+                createdAt: true,
+                vehicles: true,
+                bookings: true,
+                comments: true,
+                notifications: true,
+                commentLikes: true,
+            },
+        });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            data: users,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
