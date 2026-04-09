@@ -36,3 +36,12 @@ export const adminCreateUserSchema = z.object({
     role: z.enum(["user", "admin"]).optional(),
     phone: z.string().trim().min(7).max(20).optional(),
 });
+
+export const adminUpdateUserSchema = z.object({
+    name: z.string().min(2, "Name must be at least 2 characters").optional(),
+    email: z.string().email("Invalid email format").optional(),
+    password: passwordSchema.optional(),
+    role: z.enum(["user", "admin"]).optional(),
+    phone: z.string().trim().min(7).max(20).optional(),
+    isVerified: z.boolean().optional(),
+});
