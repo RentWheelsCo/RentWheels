@@ -1,21 +1,7 @@
 import prisma from "../utils/db.js";
 import { StatusCodes } from "http-status-codes";
-
-const MS_PER_DAY = 1000 * 60 * 60 * 24;
-
-const calcBookingDays = (pickupDate, returnDate) => {
-    const start = new Date(pickupDate);
-    const end = new Date(returnDate);
-    const diffDays = Math.ceil((end - start) / MS_PER_DAY);
-    return Math.max(1, diffDays);
-};
-
-const buildVehicleName = (vehicle) => {
-    const brand = vehicle.brand?.value;
-    const model = vehicle.model?.value;
-    if (brand && model) return `${brand} ${model}`;
-    return vehicle.type?.value || "Vehicle";
-};
+import { calcBookingDays } from "../utils/booking.utils.js";
+import { buildVehicleName } from "../utils/vehicle.utils.js";
 
 const getMonthlyRevenue = (bookings, monthsBack = 12) => {
     const now = new Date();
@@ -110,4 +96,3 @@ export const getSellerDashboard = async (req, res, next) => {
         next(error);
     }
 };
-

@@ -1,11 +1,6 @@
 import prisma from "../utils/db.js";
 import { StatusCodes } from "http-status-codes";
-
-const parsePositiveInt = (value, fallback) => {
-    const num = Number.parseInt(value, 10);
-    if (Number.isNaN(num) || num <= 0) return fallback;
-    return num;
-};
+import { parsePositiveInt } from "../utils/pagination.js";
 
 export const getMyNotifications = async (req, res, next) => {
     try {

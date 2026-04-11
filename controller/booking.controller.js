@@ -2,13 +2,8 @@ import prisma from "../utils/db.js";
 import { StatusCodes } from "http-status-codes";
 import { createBookingSchema, availabilityQuerySchema } from "../validations/booking.validation.js";
 import { notifyUser } from "../utils/notification.js";
-
-const parsePositiveInt = (value, fallback) => {
-    if (value === undefined || value === null || value === "") return fallback;
-    const num = Number.parseInt(value, 10);
-    if (Number.isNaN(num) || num <= 0) return fallback;
-    return num;
-};
+import { parsePositiveInt } from "../utils/pagination.js";
+import { buildVehicleName } from "../utils/vehicle.utils.js";
 
 const normalizeAvailabilityRange = (query) => {
     const parsed = availabilityQuerySchema.parse(query);
@@ -34,13 +29,6 @@ const findOverlappingBookings = async (vehicleIds, pickupDate, returnDate) => {
         },
         select: { vehicleId: true },
     });
-};
-
-const buildVehicleName = (vehicle) => {
-    const brand = vehicle.brand?.value;
-    const model = vehicle.model?.value;
-    if (brand && model) return `${brand} ${model}`;
-    return vehicle.type?.value || "Vehicle";
 };
 
 export const createBooking = async (req, res, next) => {
