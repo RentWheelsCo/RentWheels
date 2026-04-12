@@ -55,6 +55,7 @@ export const register = async (req, res, next) => {
                 email: parsed.email,
                 password: hashedPassword,
                 phone: parsed.phone,
+                role: parsed.role || "user",
                 profilePhoto,
                 licensePhoto: licensePhoto ? JSON.stringify(licensePhoto) : null,
             },
@@ -70,6 +71,7 @@ export const register = async (req, res, next) => {
                 id: user.id,
                 name: user.name,
                 email: user.email,
+                role: user.role,
                 isVerified: user.isVerified,
                 token,
             },
@@ -123,6 +125,7 @@ export const login = async (req, res, next) => {
                 id: user.id,
                 name: user.name,
                 email: user.email,
+                role: user.role,
                 isVerified: user.isVerified,
                 token,
             },
@@ -217,6 +220,7 @@ export const googleLogin = async (req, res, next) => {
                 id: user.id,
                 name: user.name,
                 email: user.email,
+                role: user.role,
                 isVerified: user.isVerified,
                 token,
             },
@@ -300,13 +304,17 @@ export const forgotPassword = async (req, res, next) => {
             });
         }
 
-        return res.status(StatusCodes.OK).json({
+        const body = {
             success: true,
             status: StatusCodes.OK,
             message: isDev
                 ? `Reset link sent to ${user.email}.`
                 : "If the email exists, a reset link has been sent.",
-        });
+        };
+        if (isDev) {
+            body.data = { resetToken: rawToken };
+        }
+        return res.status(StatusCodes.OK).json(body);
     } catch (error) {
         next(error);
     }

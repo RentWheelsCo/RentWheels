@@ -9,10 +9,31 @@ import { initSocket } from "./utils/socket.js";
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const corsOrigins = (process.env.CORS_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+const defaultOrigins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+];
+const allowedOrigins = new Set([...(corsOrigins.length ? corsOrigins : defaultOrigins), process.env.APP_URL].filter(Boolean));
 
-app.use(cors({
-    origin: process.env.APP_URL || 'http://localhost:3000'
-}));
+app.use(
+    cors({
+        origin(origin, cb) {
+            if (!origin || allowedOrigins.has(origin)) {
+                return cb(null, true);
+            }
+            return cb(null, false);
+        },
+        credentials: true,
+    }),
+);
 app.use(express.json());
 app.use("/api", mainRouter);
 app.get("/", (req, res) => res.send(`Server is running on Port ${PORT}`));

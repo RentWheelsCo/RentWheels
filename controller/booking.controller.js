@@ -4,6 +4,7 @@ import { createBookingSchema, availabilityQuerySchema } from "../validations/boo
 import { notifyUser } from "../utils/notification.js";
 import { parsePositiveInt } from "../utils/pagination.js";
 import { buildVehicleName } from "../utils/vehicle.utils.js";
+import { mapBookingToDashboardRow } from "../utils/booking.utils.js";
 
 const normalizeAvailabilityRange = (query) => {
     const parsed = availabilityQuerySchema.parse(query);
@@ -163,23 +164,28 @@ export const getMyBookings = async (req, res, next) => {
             },
         });
 
-        const data = bookings.map((booking) => ({
-            id: booking.id,
-            pickupDate: booking.pickupDate,
-            returnDate: booking.returnDate,
-            insuranceType: booking.insuranceType,
-            bookingStatus: booking.status,
-            createdAt: booking.createdAt,
-            vehicle: {
-                id: booking.vehicle.id,
-                name: buildVehicleName(booking.vehicle),
-                seatingCapacity: booking.vehicle.seatingCapacity,
-                transmission: booking.vehicle.transmission?.value || null,
-                category: booking.vehicle.category?.value || null,
-                dailyPrice: booking.vehicle.dailyPrice,
-                owner: booking.vehicle.owner,
-            },
-        }));
+        const data = bookings.map((booking) => {
+            const row = mapBookingToDashboardRow(booking);
+            return {
+                id: row.id,
+                pickupDate: row.pickupDate,
+                returnDate: row.returnDate,
+                insuranceType: booking.insuranceType,
+                bookingStatus: booking.status,
+                totalAmount: row.totalAmount,
+                createdAt: row.createdAt,
+                vehicle: {
+                    id: booking.vehicle.id,
+                    name: row.vehicleName,
+                    year: booking.vehicle.year,
+                    seatingCapacity: booking.vehicle.seatingCapacity,
+                    transmission: booking.vehicle.transmission?.value || null,
+                    category: booking.vehicle.category?.value || null,
+                    dailyPrice: booking.vehicle.dailyPrice,
+                    owner: booking.vehicle.owner,
+                },
+            };
+        });
 
         return res.status(StatusCodes.OK).json({
             success: true,
@@ -236,6 +242,64 @@ export const getMyVehiclesAvailability = async (req, res, next) => {
                 pickupDate,
                 returnDate,
                 vehicles: data,
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getBookingsForMyListings = async (req, res, next) => {
+    try {
+        const page = parsePositiveInt(req.query.page, 1);
+        const limit = Math.min(parsePositiveInt(req.query.limit, 20), 50);
+        const skip = (page - 1) * limit;
+
+        const bookings = await prisma.booking.findMany({
+            where: { vehicle: { ownerId: req.user.id } },
+            orderBy: { createdAt: "desc" },
+            skip,
+            take: limit,
+            include: {
+                renter: {
+                    select: { id: true, name: true, email: true, phone: true },
+                },
+                vehicle: {
+                    include: {
+                        type: true,
+                        brand: true,
+                        model: true,
+                        photos: true,
+                    },
+                },
+            },
+        });
+
+        const data = bookings.map((booking) => {
+            const row = mapBookingToDashboardRow(booking);
+            return {
+                id: row.id,
+                pickupDate: row.pickupDate,
+                returnDate: row.returnDate,
+                status: booking.status,
+                insuranceType: booking.insuranceType,
+                totalAmount: row.totalAmount,
+                renter: booking.renter,
+                vehicle: {
+                    id: booking.vehicle.id,
+                    name: row.vehicleName,
+                    photos: booking.vehicle.photos,
+                },
+            };
+        });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            data: {
+                page,
+                limit,
+                bookings: data,
             },
         });
     } catch (error) {

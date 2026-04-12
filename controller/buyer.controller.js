@@ -3,17 +3,24 @@ import { StatusCodes } from "http-status-codes";
 import { mapBookingToDashboardRow } from "../utils/booking.utils.js";
 import { aggregateMonthlyBookingTotals } from "../utils/dashboard.utils.js";
 
-export const getSellerDashboard = async (req, res, next) => {
+export const getBuyerDashboard = async (req, res, next) => {
     try {
-        const [totalVehicles, totalBookings] = await Promise.all([
-            prisma.vehicle.count({ where: { ownerId: req.user.id } }),
+        const startToday = new Date();
+        startToday.setHours(0, 0, 0, 0);
+
+        const [totalBookings, ongoingBookings] = await Promise.all([
+            prisma.booking.count({ where: { renterId: req.user.id } }),
             prisma.booking.count({
-                where: { vehicle: { ownerId: req.user.id } },
+                where: {
+                    renterId: req.user.id,
+                    status: { not: "CANCELLED" },
+                    returnDate: { gte: startToday },
+                },
             }),
         ]);
 
         const recentBookingsRaw = await prisma.booking.findMany({
-            where: { vehicle: { ownerId: req.user.id } },
+            where: { renterId: req.user.id },
             orderBy: { createdAt: "desc" },
             take: 10,
             include: {
@@ -29,10 +36,10 @@ export const getSellerDashboard = async (req, res, next) => {
 
         const recentBookings = recentBookingsRaw.map(mapBookingToDashboardRow);
 
-        const revenueBookings = await prisma.booking.findMany({
+        const spendBookings = await prisma.booking.findMany({
             where: {
+                renterId: req.user.id,
                 status: { not: "CANCELLED" },
-                vehicle: { ownerId: req.user.id },
             },
             select: {
                 pickupDate: true,
@@ -41,20 +48,20 @@ export const getSellerDashboard = async (req, res, next) => {
             },
         });
 
-        const monthlyTotals = aggregateMonthlyBookingTotals(revenueBookings, 12);
-        const monthlyRevenue = monthlyTotals.map(({ month, amount }) => ({
+        const monthlyTotals = aggregateMonthlyBookingTotals(spendBookings, 12);
+        const monthlySpending = monthlyTotals.map(({ month, amount }) => ({
             month,
-            revenue: amount,
+            spend: amount,
         }));
 
         return res.status(StatusCodes.OK).json({
             success: true,
             status: StatusCodes.OK,
             data: {
-                totalVehicles,
                 totalBookings,
+                ongoingBookings,
                 recentBookings,
-                monthlyRevenue,
+                monthlySpending,
             },
         });
     } catch (error) {
