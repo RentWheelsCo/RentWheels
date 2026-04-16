@@ -7,6 +7,11 @@ import {
 } from "../validations/comment.validation.js";
 import { notifyUser } from "../utils/notification.js";
 
+/**
+ * Comment Controller
+ * Handles creation, retrieval, and interaction (like/reply) for comments.
+ */
+
 const selectUser = {
     id: true,
     name: true,
@@ -45,6 +50,7 @@ export const createComment = async (req, res, next) => {
         }
 
         if (parsed.parentId) {
+            // Ensure parent comment belongs to the same vehicle.
             const parent = await prisma.comment.findUnique({
                 where: { id: parsed.parentId },
                 select: { id: true, vehicleId: true },
@@ -78,6 +84,7 @@ export const createComment = async (req, res, next) => {
             },
         });
 
+        // Notify vehicle owner
         if (vehicle.ownerId !== req.user.id) {
             try {
                 await notifyUser({
@@ -141,6 +148,7 @@ export const replyToComment = async (req, res, next) => {
             },
         });
 
+        // Notify original commenter
         if (parent.userId !== req.user.id) {
             try {
                 await notifyUser({
@@ -272,6 +280,7 @@ export const likeComment = async (req, res, next) => {
             },
         });
 
+        // Notify comment owner
         if (comment.userId !== req.user.id) {
             try {
                 await notifyUser({

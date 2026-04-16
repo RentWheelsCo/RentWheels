@@ -108,7 +108,8 @@ export const createBooking = async (req, res, next) => {
                     userId: vehicle.ownerId,
                     type: "BOOKING_CREATED",
                     title: "New booking received",
-                    message: `${renter?.name || "A renter"} booked your ${vehicleName} from ${pickupLabel} to ${returnLabel}.`,
+                    message: `${renter?.name || "A renter"} booked
+                    your ${vehicleName} from ${pickupLabel} to ${returnLabel}.`,
                     email: vehicle.owner?.email || null,
                 });
             }

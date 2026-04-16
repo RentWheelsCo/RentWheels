@@ -1,6 +1,10 @@
 import jwt from "jsonwebtoken";
 import { StatusCodes } from "http-status-codes";
 
+/**
+ * Authentication middleware.
+ * Validates token
+ */
 export const authMiddleware = (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
@@ -17,7 +21,7 @@ export const authMiddleware = (req, res, next) => {
 
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            req.user = decoded; // attach user info to request
+            req.user = decoded;
             next();
         } catch (err) {
             return res.status(StatusCodes.UNAUTHORIZED).json({
@@ -35,6 +39,9 @@ export const authMiddleware = (req, res, next) => {
     }
 };
 
+/**
+ * Role authorization middleware.
+ */
 export const authorizeRoles = (...allowedRoles) => {
     return (req, res, next) => {
         if (!req.user) {
