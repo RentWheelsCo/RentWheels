@@ -270,7 +270,6 @@ export const getBookingsForMyListings = async (req, res, next) => {
                         type: true,
                         brand: true,
                         model: true,
-                        photos: true,
                     },
                 },
             },
