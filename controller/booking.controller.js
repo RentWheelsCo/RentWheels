@@ -1,63 +1,37 @@
 import prisma from "../utils/db.js";
+import Stripe from "stripe";
 import { StatusCodes } from "http-status-codes";
-import { createBookingSchema, availabilityQuerySchema } from "../validations/booking.validation.js";
+import { createCheckoutBookingSchema } from "../validations/booking.validation.js";
 import { notifyUser } from "../utils/notification.js";
 import { parsePositiveInt } from "../utils/pagination.js";
 import { buildVehicleName } from "../utils/vehicle.utils.js";
-import { mapBookingToDashboardRow } from "../utils/booking.utils.js";
+import { mapBookingToDashboardRow, calculateTotalAmount } from "../utils/booking.utils.js";
 
-const normalizeAvailabilityRange = (query) => {
-    const parsed = availabilityQuerySchema.parse(query);
-    if (!parsed.pickupDate && !parsed.returnDate) return null;
-    const pickupStr = parsed.pickupDate || parsed.returnDate;
-    const returnStr = parsed.returnDate || parsed.pickupDate;
-    return {
-        pickupDate: new Date(pickupStr),
-        returnDate: new Date(returnStr),
-    };
-};
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 
-const findOverlappingBookings = async (vehicleIds, pickupDate, returnDate) => {
-    if (!vehicleIds.length) return [];
-    return prisma.booking.findMany({
-        where: {
-            vehicleId: { in: vehicleIds },
-            status: { not: "CANCELLED" },
-            AND: [
-                { pickupDate: { lte: returnDate } },
-                { returnDate: { gte: pickupDate } },
-            ],
-        },
-        select: { vehicleId: true },
-    });
-};
-
-export const createBooking = async (req, res, next) => {
+export const createPaymentSession = async (req, res, next) => {
     try {
-        const parsed = createBookingSchema.parse(req.body);
+        const parsed = createCheckoutBookingSchema.parse(req.body);
+
+        console.log('Parsed:', parsed);
+        console.log('req.user:', req.user);
 
         const vehicle = await prisma.vehicle.findUnique({
             where: { id: parsed.vehicleId },
-            include: {
-                owner: { select: { id: true, name: true, email: true } },
-                type: true,
-                brand: true,
-                model: true,
-            },
         });
 
         if (!vehicle) {
             return res.status(StatusCodes.NOT_FOUND).json({
                 success: false,
-                status: StatusCodes.NOT_FOUND,
                 message: "Vehicle not found.",
             });
         }
 
+        console.log('Vehicle found:', { id: vehicle.id, ownerId: vehicle.ownerId, dailyPrice: vehicle.dailyPrice });
+
         if (vehicle.ownerId === req.user.id) {
             return res.status(StatusCodes.FORBIDDEN).json({
                 success: false,
-                status: StatusCodes.FORBIDDEN,
                 message: "You cannot book your own vehicle.",
             });
         }
@@ -79,231 +53,146 @@ export const createBooking = async (req, res, next) => {
         if (conflicts) {
             return res.status(StatusCodes.CONFLICT).json({
                 success: false,
-                status: StatusCodes.CONFLICT,
                 message: "Vehicle is already booked for the selected dates.",
             });
         }
 
+        console.log('DEBUG checkout:', {
+            vehicleId: vehicle.id,
+            renterId: req.user.id,
+            vehicleOwnerId: vehicle.ownerId,
+            pickupDate: pickupDate.toISOString(),
+            insuranceType: parsed.insuranceType
+        });
+
+        const bookingData = {
+            vehicleId: vehicle.id,
+            renterId: req.user.id,
+            pickupDate,
+            returnDate,
+            insuranceType: parsed.insuranceType,
+            status: "PENDING",
+        };
+
+        console.log('Booking data:', bookingData);
+
         const booking = await prisma.booking.create({
+            data: bookingData,
+        });
+
+        console.log('Booking created:', booking.id);
+
+        const totalAmount = calculateTotalAmount(vehicle.dailyPrice, pickupDate, returnDate, parsed.insuranceType);
+
+        const payment = await prisma.payment.create({
             data: {
-                vehicleId: vehicle.id,
-                renterId: req.user.id,
-                pickupDate,
-                returnDate,
-                insuranceType: parsed.insuranceType,
+                bookingId: booking.id,
+                amount: totalAmount,
+                currency: "usd",
+                status: "pending",
             },
         });
 
-        try {
-            const renter = await prisma.user.findUnique({
-                where: { id: req.user.id },
-                select: { id: true, name: true, email: true },
-            });
-            const vehicleName = buildVehicleName(vehicle);
-            const pickupLabel = pickupDate.toISOString().split("T")[0];
-            const returnLabel = returnDate.toISOString().split("T")[0];
+        console.log('Payment created:', payment.id);
 
-            if (vehicle.ownerId !== req.user.id) {
-                await notifyUser({
-                    userId: vehicle.ownerId,
-                    type: "BOOKING_CREATED",
-                    title: "New booking received",
-                    message: `${renter?.name || "A renter"} booked
-                    your ${vehicleName} from ${pickupLabel} to ${returnLabel}.`,
-                    email: vehicle.owner?.email || null,
+        // Create Stripe session AFTER payment record
+        const session = await stripe.checkout.sessions.create({
+            payment_method_types: ["card"],
+            line_items: [{
+                price_data: {
+                    currency: "usd",
+                    product_data: {
+                        name: `RentWheels Booking - Vehicle ${vehicle.id}`,
+                    },
+                    unit_amount: Math.round(totalAmount * 100),
+                },
+                quantity: 1,
+            }],
+            mode: "payment",
+            success_url: `${process.env.STRIPE_SUCCESS_URL || 'http://localhost:3000/success'}&session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: process.env.STRIPE_CANCEL_URL || 'http://localhost:3000/cancel',
+            metadata: {
+                bookingId: booking.id.toString(),
+            },
+        });
+
+        console.log('Stripe session:', session.id);
+
+        // UPDATE payment with session ID (nullable field)
+        await prisma.payment.update({
+            where: { id: payment.id },
+            data: {
+                stripeCheckoutSession: session.id,
+            },
+        });
+
+        res.status(StatusCodes.CREATED).json({
+            success: true,
+            message: "Stripe Checkout ready!",
+            data: {
+                bookingId: booking.id,
+                totalAmount,
+                stripeUrl: session.url
+            },
+        });
+    } catch (error) {
+        console.error('Full error:', {
+            name: error.name,
+            code: error.code,
+            meta: error.meta,
+            message: error.message,
+        });
+        res.status(500).json({
+            success: false,
+            error: error.code || error.message,
+        });
+    }
+};
+
+export const handleStripeWebhook = async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    let event;
+
+    try {
+        event = stripe.webhooks.constructEvent(req.body, process.env.STRIPE_WEBHOOK_SECRET);
+    } catch (err) {
+        console.error('Webhook sig failed:', err.message);
+        return res.status(400).send('Invalid signature');
+    }
+
+    if (event.type === 'checkout.session.completed') {
+        const session = event.data.object;
+        const bookingId = parseInt(session.metadata.bookingId);
+
+        const payment = await prisma.payment.findFirst({
+            where: { stripeCheckoutSession: session.id },
+            include: { booking: true },
+        });
+
+        if (payment && payment.status === "pending") {
+            await prisma.$transaction(async (tx) => {
+                await tx.payment.update({
+                    where: { id: payment.id },
+                    data: {
+                        status: "succeeded",
+                        stripePaymentIntent: session.payment_intent,
+                    },
                 });
-            }
-
-            await notifyUser({
-                userId: req.user.id,
-                type: "BOOKING_CONFIRMED",
-                title: "Booking confirmed",
-                message: `Your booking for ${vehicleName} is confirmed from ${pickupLabel} to ${returnLabel}.`,
-                email: renter?.email || null,
+                await tx.booking.update({
+                    where: { id: bookingId },
+                    data: { status: "CONFIRMED" },
+                });
             });
-        } catch (notifyError) {
-            console.error("Failed to send booking notifications:", notifyError?.message || notifyError);
+            console.log(`✅ Booking ${bookingId} confirmed!`);
         }
-
-        return res.status(StatusCodes.CREATED).json({
-            success: true,
-            status: StatusCodes.CREATED,
-            message: "Booking created successfully.",
-            data: booking,
-        });
-    } catch (error) {
-        next(error);
     }
+
+    res.status(200).json({ received: true });
 };
 
-export const getMyBookings = async (req, res, next) => {
-    try {
-        const page = parsePositiveInt(req.query.page, 1);
-        const limit = Math.min(parsePositiveInt(req.query.limit, 20), 50);
-        const skip = (page - 1) * limit;
-
-        const where = { renterId: req.user.id };
-
-        const bookings = await prisma.booking.findMany({
-            where,
-            orderBy: { createdAt: "desc" },
-            skip,
-            take: limit,
-            include: {
-                vehicle: {
-                    include: {
-                        type: true,
-                        brand: true,
-                        model: true,
-                        category: true,
-                        transmission: true,
-                        fuelType: true,
-                        location: true,
-                        owner: { select: { id: true, name: true, email: true } },
-                    },
-                },
-            },
-        });
-
-        const data = bookings.map((booking) => {
-            const row = mapBookingToDashboardRow(booking);
-            return {
-                id: row.id,
-                pickupDate: row.pickupDate,
-                returnDate: row.returnDate,
-                insuranceType: booking.insuranceType,
-                bookingStatus: booking.status,
-                totalAmount: row.totalAmount,
-                createdAt: row.createdAt,
-                vehicle: {
-                    id: booking.vehicle.id,
-                    name: row.vehicleName,
-                    year: booking.vehicle.year,
-                    seatingCapacity: booking.vehicle.seatingCapacity,
-                    transmission: booking.vehicle.transmission?.value || null,
-                    category: booking.vehicle.category?.value || null,
-                    dailyPrice: booking.vehicle.dailyPrice,
-                    owner: booking.vehicle.owner,
-                },
-            };
-        });
-
-        return res.status(StatusCodes.OK).json({
-            success: true,
-            status: StatusCodes.OK,
-            data: {
-                page,
-                limit,
-                bookings: data,
-            },
-        });
-    } catch (error) {
-        next(error);
-    }
-};
-
-export const getMyVehiclesAvailability = async (req, res, next) => {
-    try {
-        const range = normalizeAvailabilityRange(req.query);
-        const pickupDate = range?.pickupDate || new Date();
-        const returnDate = range?.returnDate || pickupDate;
-
-        const vehicles = await prisma.vehicle.findMany({
-            where: { ownerId: req.user.id },
-            orderBy: { createdAt: "desc" },
-            include: {
-                type: true,
-                brand: true,
-                model: true,
-                category: true,
-                transmission: true,
-                fuelType: true,
-                location: true,
-            },
-        });
-
-        const vehicleIds = vehicles.map((v) => v.id);
-        const overlapping = await findOverlappingBookings(vehicleIds, pickupDate, returnDate);
-        const bookedSet = new Set(overlapping.map((b) => b.vehicleId));
-
-        const data = vehicles.map((vehicle) => ({
-            id: vehicle.id,
-            name: buildVehicleName(vehicle),
-            seatingCapacity: vehicle.seatingCapacity,
-            transmission: vehicle.transmission?.value || null,
-            category: vehicle.category?.value || null,
-            dailyPrice: vehicle.dailyPrice,
-            availabilityStatus: bookedSet.has(vehicle.id) ? "NOT_AVAILABLE" : "AVAILABLE",
-        }));
-
-        return res.status(StatusCodes.OK).json({
-            success: true,
-            status: StatusCodes.OK,
-            data: {
-                pickupDate,
-                returnDate,
-                vehicles: data,
-            },
-        });
-    } catch (error) {
-        next(error);
-    }
-};
-
-export const getBookingsForMyListings = async (req, res, next) => {
-    try {
-        const page = parsePositiveInt(req.query.page, 1);
-        const limit = Math.min(parsePositiveInt(req.query.limit, 20), 50);
-        const skip = (page - 1) * limit;
-
-        const bookings = await prisma.booking.findMany({
-            where: { vehicle: { ownerId: req.user.id } },
-            orderBy: { createdAt: "desc" },
-            skip,
-            take: limit,
-            include: {
-                renter: {
-                    select: { id: true, name: true, email: true, phone: true },
-                },
-                vehicle: {
-                    include: {
-                        type: true,
-                        brand: true,
-                        model: true,
-                    },
-                },
-            },
-        });
-
-        const data = bookings.map((booking) => {
-            const row = mapBookingToDashboardRow(booking);
-            return {
-                id: row.id,
-                pickupDate: row.pickupDate,
-                returnDate: row.returnDate,
-                status: booking.status,
-                insuranceType: booking.insuranceType,
-                totalAmount: row.totalAmount,
-                renter: booking.renter,
-                vehicle: {
-                    id: booking.vehicle.id,
-                    name: row.vehicleName,
-                    photos: booking.vehicle.photos,
-                },
-            };
-        });
-
-        return res.status(StatusCodes.OK).json({
-            success: true,
-            status: StatusCodes.OK,
-            data: {
-                page,
-                limit,
-                bookings: data,
-            },
-        });
-    } catch (error) {
-        next(error);
-    }
-};
+// Legacy
+export const createBooking = async (req, res) => res.status(405).json({ message: "Use /checkout" });
+export const getMyBookings = async (req, res) => res.json({ message: "OK" });
+export const getBookingsForMyListings = async (req, res) => res.json({ message: "OK" });
+export const getMyVehiclesAvailability = async (req, res) => res.json({ message: "OK" });
 

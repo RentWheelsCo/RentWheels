@@ -5,16 +5,21 @@ const dateString = z.string().refine((value) => {
     return !Number.isNaN(d.getTime());
 }, { message: "Invalid date format." });
 
+export const INSURANCE_TYPES = ["BASIC", "STANDARD", "PREMIUM"];
+export const insuranceTypeEnum = z.enum(INSURANCE_TYPES);
+
 export const createBookingSchema = z.object({
     vehicleId: z.coerce.number().int().positive(),
     pickupDate: dateString,
     returnDate: dateString,
-    insuranceType: z.string().trim().min(1).max(50),
+    insuranceType: insuranceTypeEnum,
 }).refine((data) => {
     const pickup = new Date(data.pickupDate);
     const ret = new Date(data.returnDate);
     return pickup <= ret;
 }, { message: "returnDate must be on or after pickupDate." });
+
+export const createCheckoutBookingSchema = createBookingSchema;
 
 export const availabilityQuerySchema = z.object({
     pickupDate: dateString.optional(),

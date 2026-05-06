@@ -9,7 +9,30 @@ export const calcBookingDays = (pickupDate, returnDate) => {
   return Math.max(1, diffDays);
 };
 
-/** Shared shape for seller/buyer dashboard “recent booking” rows. */
+/**
+ * Calculate total booking amount = (dailyPrice * days) + insurance fee
+ * Insurance: BASIC=0, STANDARD=10% dailyPrice, PREMIUM=20% dailyPrice (per booking)
+ */
+export const calculateTotalAmount = (vehicleDailyPrice, pickupDate, returnDate, insuranceType) => {
+  const days = calcBookingDays(pickupDate, returnDate);
+  let insuranceMultiplier = 0;
+  switch (insuranceType.toUpperCase()) {
+    case 'STANDARD':
+      insuranceMultiplier = 0.1;
+      break;
+    case 'PREMIUM':
+      insuranceMultiplier = 0.2;
+      break;
+    case 'BASIC':
+    default:
+      insuranceMultiplier = 0;
+  }
+  const baseAmount = vehicleDailyPrice * days;
+  const insuranceAmount = baseAmount * insuranceMultiplier;
+  return baseAmount + insuranceAmount;
+};
+
+/** Shared shape for seller/buyer dashboard "recent booking" rows. */
 export const mapBookingToDashboardRow = (booking) => {
   const days = calcBookingDays(booking.pickupDate, booking.returnDate);
   const totalAmount = days * booking.vehicle.dailyPrice;
@@ -23,3 +46,4 @@ export const mapBookingToDashboardRow = (booking) => {
     createdAt: booking.createdAt,
   };
 };
+

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RentWheels Stripe Test UI - FIXED</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+
+        form {
+            display: grid;
+            gap: 15px;
+        }
+
+        input,
+        select,
+        button {
+            padding: 12px;
+            font-size: 16px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        button {
+            background: #635bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #534cde;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .loading {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .fixed {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🛵 RentWheels Stripe Test UI <span style="color:green">✓ FIXED PATHS</span></h1>
+    <p><strong>Endpoints:</strong> <code>/api/bookings/checkout</code> & <code>/api/bookings/webhook</code></p>
+    <p>Server: <span id="serverUrl">http://localhost:5000</span> | Need JWT from login</p>
+
+    <form id="bookingForm">
+        <label>Vehicle ID: <input type="number" id="vehicleId" value="1" required min="1"></label>
+        <label>Pickup (Local): <input type="datetime-local" id="pickupDate" required></label>
+        <label>Return (Local): <input type="datetime-local" id="returnDate" required></label>
+        <label>Insurance:
+            <select id="insuranceType">
+                <option value="BASIC">Basic (free)</option>
+                <option value="STANDARD" selected>Standard (+10%)</option>
+                <option value="PREMIUM">Premium (+20%)</option>
+            </select>
+        </label>
+        <label><strong>JWT Token:</strong> <input type="text" id="jwt"
+                placeholder="Bearer eyJ... from /api/auth/login Network tab" style="width:100%"></label>
+        <button type="submit" id="submitBtn">🚀 Test Stripe Checkout</button>
+    </form>
+
+    <div id="status" class="fixed">🔧 Fixed: /api/booking → /api/bookings/checkout (note 's')</div>
+
+    <script>
+        const form = document.getElementById('bookingForm');
+        const status = document.getElementById('status');
+        const submitBtn = document.getElementById('submitBtn');
+        const checkoutUrl = 'http://localhost:5000/api/bookings/checkout';  // FIXED PATH!
+
+        // Default dates
+        const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        tomorrow.setHours(10, 0, 0);
+        document.getElementById('pickupDate').value = tomorrow.toISOString().slice(0, 16);
+
+        const returnTomorrow = new Date(tomorrow);
+        returnTomorrow.setDate(returnTomorrow.getDate() + 2);
+        document.getElementById('returnDate').value = returnTomorrow.toISOString().slice(0, 16);
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+
+            const jwt = document.getElementById('jwt').value.trim();
+            if (!jwt) return status.innerHTML = '<strong>❌ JWT required!</strong> Login → DevTools Network → copy Authorization header';
+
+            const data = {
+                vehicleId: parseInt(document.getElementById('vehicleId').value),
+                pickupDate: new Date(document.getElementById('pickupDate').value + ':00').toISOString(),
+                returnDate: new Date(document.getElementById('returnDate').value + ':00').toISOString(),
+                insuranceType: document.getElementById('insuranceType').value,
+            };
+
+            if (new Date(data.pickupDate) >= new Date(data.returnDate)) {
+                return status.innerHTML = '<strong>❌ Return > Pickup date</strong>';
+            }
+
+            status.textContent = 'Creating Stripe session...';
+            status.className = 'status loading';
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Loading...';
+
+            try {
+                const res = await fetch(checkoutUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': jwt
+                    },
+                    body: JSON.stringify(data),
+                });
+
+                const result = await res.json();
+
+                if (res.ok && result.data?.url) {
+                    status.innerHTML = `✅ <a href="${result.data.url}" target="_blank">Open Stripe Checkout → Pay Now</a>`;
+                    status.className = 'status success';
+                } else {
+                    status.textContent = `❌ ${result.message || 'Server error'}`;
+                    status.className = 'status error';
+                }
+            } catch (err) {
+                status.textContent = `❌ Network/Fetch error: ${err.message}`;
+                status.className = 'status error';
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🚀 Test Stripe Checkout';
+            }
+        };
+    </script>
+</body>
+
+</html>
