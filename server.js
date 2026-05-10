@@ -41,24 +41,21 @@ app.use(
 );
 app.use(express.json());
 app.use("/api", mainRouter);
-app.use("/test-ui", express.static("test-ui"));  // Stripe test UI
 app.get("/", (req, res) => res.send(`
-<h1>🚗 RentWheels + Stripe Ready!</h1>
+<h1>RentWheels api working! :)</h1>
 <p>Server Port ${PORT} | DB connected</p>
-<a href="/test-ui/test.html" style="font-size:24px;padding:10px;background:#635bff;color:white;text-decoration:none;border-radius:5px">💳 Test Stripe Checkout →</a>
-<p><small>Login: renter@test.com / password → Copy JWT → Test</small></p>
 `));
 app.use(errorMiddleware);
 
 async function startServer() {
     try {
         await prisma.$connect();
-        console.log("✅ Database connected!");
+        console.log("Database connected!");
         const server = http.createServer(app);
         initSocket(server);
-        server.listen(PORT, () => console.log(`🚀 Server running http://localhost:${PORT}`));
+        server.listen(PORT, () => console.log(`Server running http://localhost:${PORT}`));
     } catch (error) {
-        console.error("❌ DB error:", error);
+        console.error("Database failed to connect:", error);
         process.exit(1);
     }
 }
