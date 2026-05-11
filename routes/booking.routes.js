@@ -6,6 +6,9 @@ import {
     getMyBookings,
     getMyVehiclesAvailability,
     getBookingsForMyListings,
+    getBookingById,
+    cancelBooking,
+    returnBooking,
 } from "../controller/booking.controller.js";
 
 const router = express.Router();
@@ -13,18 +16,15 @@ const router = express.Router();
 // Payment flow
 router.post("/checkout", authMiddleware, createPaymentSession);
 
-// Stripe webhook (no auth)
+// Stripe webhook
 router.post("/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
 
-// Existing routes
 router.get("/as-owner", authMiddleware, getBookingsForMyListings);
 router.get("/my", authMiddleware, getMyBookings);
+router.get("/:id", authMiddleware, getBookingById);
+router.post("/:id/cancel", authMiddleware, cancelBooking);
+router.post("/:id/return", authMiddleware, returnBooking);
 router.get("/my-vehicles", authMiddleware, getMyVehiclesAvailability);
-
-// Legacy / deprecated
-router.post("/", authMiddleware, (req, res) => {
-    res.status(405).json({ message: "Use POST /booking/checkout for payments" });
-});
 
 export default router;
 

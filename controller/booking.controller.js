@@ -1,7 +1,7 @@
 import prisma from "../utils/db.js";
 import Stripe from "stripe";
 import { StatusCodes } from "http-status-codes";
-import { createCheckoutBookingSchema } from "../validations/booking.validation.js";
+import { createCheckoutBookingSchema, availabilityQuerySchema } from "../validations/booking.validation.js";
 import { notifyUser } from "../utils/notification.js";
 import { parsePositiveInt } from "../utils/pagination.js";
 import { buildVehicleName } from "../utils/vehicle.utils.js";
@@ -190,9 +190,352 @@ export const handleStripeWebhook = async (req, res) => {
     res.status(200).json({ received: true });
 };
 
-// Legacy
-export const createBooking = async (req, res) => res.status(405).json({ message: "Use /checkout" });
-export const getMyBookings = async (req, res) => res.json({ message: "OK" });
-export const getBookingsForMyListings = async (req, res) => res.json({ message: "OK" });
-export const getMyVehiclesAvailability = async (req, res) => res.json({ message: "OK" });
+export const getMyBookings = async (req, res, next) => {
+    try {
+        const page = parsePositiveInt(req.query.page, 1);
+        const limit = Math.min(parsePositiveInt(req.query.limit, 20), 100);
+        const skip = (page - 1) * limit;
+
+        const [total, bookingsRaw] = await Promise.all([
+            prisma.booking.count({ where: { renterId: req.user.id } }),
+            prisma.booking.findMany({
+                where: { renterId: req.user.id },
+                orderBy: { createdAt: "desc" },
+                skip,
+                take: limit,
+                include: {
+                    vehicle: {
+                        include: {
+                            type: true,
+                            brand: true,
+                            model: true,
+                            category: true,
+                            transmission: true,
+                            fuelType: true,
+                            location: true,
+                            owner: { select: { id: true, name: true, email: true, phone: true } },
+                        },
+                    },
+                    payment: true,
+                },
+            }),
+        ]);
+
+        const bookings = bookingsRaw.map((b) => ({
+            id: b.id,
+            pickupDate: b.pickupDate,
+            returnDate: b.returnDate,
+            insuranceType: b.insuranceType,
+            status: b.status,
+            createdAt: b.createdAt,
+            updatedAt: b.updatedAt,
+            totalAmount: calculateTotalAmount(b.vehicle?.dailyPrice || 0, b.pickupDate, b.returnDate, b.insuranceType),
+            vehicle: b.vehicle
+                ? {
+                    ...b.vehicle,
+                    name: buildVehicleName(b.vehicle),
+                }
+                : null,
+            payment: b.payment
+                ? {
+                    id: b.payment.id,
+                    amount: b.payment.amount,
+                    currency: b.payment.currency,
+                    status: b.payment.status,
+                    stripeCheckoutSession: b.payment.stripeCheckoutSession,
+                    stripePaymentIntent: b.payment.stripePaymentIntent,
+                }
+                : null,
+        }));
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            data: { page, limit, total, bookings },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getBookingsForMyListings = async (req, res, next) => {
+    try {
+        const page = parsePositiveInt(req.query.page, 1);
+        const limit = Math.min(parsePositiveInt(req.query.limit, 20), 100);
+        const skip = (page - 1) * limit;
+
+        const where = { vehicle: { ownerId: req.user.id } };
+
+        const [total, bookingsRaw] = await Promise.all([
+            prisma.booking.count({ where }),
+            prisma.booking.findMany({
+                where,
+                orderBy: { createdAt: "desc" },
+                skip,
+                take: limit,
+                include: {
+                    renter: { select: { id: true, name: true, email: true, phone: true } },
+                    vehicle: { select: { id: true, photos: true, dailyPrice: true, year: true, ownerId: true } },
+                },
+            }),
+        ]);
+
+        const vehicleIds = Array.from(new Set(bookingsRaw.map((b) => b.vehicleId)));
+        const vehiclesFull = await prisma.vehicle.findMany({
+            where: { id: { in: vehicleIds } },
+            include: { brand: true, model: true, type: true, category: true, transmission: true, fuelType: true, location: true },
+        });
+        const vById = new Map(vehiclesFull.map((v) => [v.id, v]));
+
+        const bookings = bookingsRaw.map((b) => {
+            const v = vById.get(b.vehicleId);
+            return {
+                id: b.id,
+                pickupDate: b.pickupDate,
+                returnDate: b.returnDate,
+                insuranceType: b.insuranceType,
+                status: b.status,
+                createdAt: b.createdAt,
+                updatedAt: b.updatedAt,
+                totalAmount: v ? calculateTotalAmount(v.dailyPrice, b.pickupDate, b.returnDate, b.insuranceType) : 0,
+                renter: b.renter,
+                vehicle: v ? { ...v, photos: b.vehicle?.photos || v.photos, name: buildVehicleName(v) } : null,
+            };
+        });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            data: { page, limit, total, bookings },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getBookingById = async (req, res, next) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Invalid booking id.",
+            });
+        }
+
+        const booking = await prisma.booking.findUnique({
+            where: { id },
+            include: {
+                renter: { select: { id: true, name: true, email: true, phone: true } },
+                vehicle: { include: { owner: { select: { id: true, name: true, email: true, phone: true } }, type: true, brand: true, model: true, category: true, transmission: true, fuelType: true, location: true } },
+                payment: true,
+            },
+        });
+        if (!booking) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "Booking not found.",
+            });
+        }
+
+        const isRenter = booking.renterId === req.user.id;
+        const isOwner = booking.vehicle?.ownerId === req.user.id;
+        if (!isRenter && !isOwner && req.user.role !== "admin") {
+            return res.status(StatusCodes.FORBIDDEN).json({
+                success: false,
+                status: StatusCodes.FORBIDDEN,
+                message: "Forbidden.",
+            });
+        }
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            data: {
+                id: booking.id,
+                pickupDate: booking.pickupDate,
+                returnDate: booking.returnDate,
+                insuranceType: booking.insuranceType,
+                status: booking.status,
+                createdAt: booking.createdAt,
+                updatedAt: booking.updatedAt,
+                totalAmount: calculateTotalAmount(booking.vehicle?.dailyPrice || 0, booking.pickupDate, booking.returnDate, booking.insuranceType),
+                renter: booking.renter,
+                vehicle: booking.vehicle ? { ...booking.vehicle, name: buildVehicleName(booking.vehicle) } : null,
+                payment: booking.payment,
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const cancelBooking = async (req, res, next) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Invalid booking id.",
+            });
+        }
+
+        const booking = await prisma.booking.findUnique({
+            where: { id },
+            include: { vehicle: { select: { ownerId: true } } },
+        });
+        if (!booking) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "Booking not found.",
+            });
+        }
+
+        const isRenter = booking.renterId === req.user.id;
+        const isOwner = booking.vehicle?.ownerId === req.user.id;
+        if (!isRenter && !isOwner && req.user.role !== "admin") {
+            return res.status(StatusCodes.FORBIDDEN).json({
+                success: false,
+                status: StatusCodes.FORBIDDEN,
+                message: "Forbidden.",
+            });
+        }
+
+        if (booking.status === "CANCELLED") {
+            return res.status(StatusCodes.OK).json({ success: true, status: StatusCodes.OK, data: { id, status: "CANCELLED" } });
+        }
+
+        const updated = await prisma.booking.update({
+            where: { id },
+            data: { status: "CANCELLED" },
+        });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            message: "Booking cancelled.",
+            data: { id: updated.id, status: updated.status },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const returnBooking = async (req, res, next) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Invalid booking id.",
+            });
+        }
+
+        const booking = await prisma.booking.findUnique({
+            where: { id },
+            include: { vehicle: { select: { ownerId: true } } },
+        });
+        if (!booking) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "Booking not found.",
+            });
+        }
+
+        const isOwner = booking.vehicle?.ownerId === req.user.id;
+        if (!isOwner && req.user.role !== "admin") {
+            return res.status(StatusCodes.FORBIDDEN).json({
+                success: false,
+                status: StatusCodes.FORBIDDEN,
+                message: "Only the vehicle owner can mark a booking as returned.",
+            });
+        }
+
+        const updated = await prisma.booking.update({
+            where: { id },
+            data: { status: "COMPLETED" },
+        });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            message: "Booking marked as returned.",
+            data: { id: updated.id, status: updated.status },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const getMyVehiclesAvailability = async (req, res, next) => {
+    try {
+        const parsed = availabilityQuerySchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: parsed.error?.issues?.[0]?.message || "Invalid query.",
+            });
+        }
+
+        const pickupDate = parsed.data.pickupDate ? new Date(parsed.data.pickupDate) : null;
+        const returnDate = parsed.data.returnDate ? new Date(parsed.data.returnDate) : null;
+        const hasDateFilter = Boolean(pickupDate && returnDate);
+
+        const vehicles = await prisma.vehicle.findMany({
+            where: { ownerId: req.user.id },
+            orderBy: { createdAt: "desc" },
+            include: {
+                type: true,
+                brand: true,
+                model: true,
+                category: true,
+                transmission: true,
+                fuelType: true,
+                location: true,
+            },
+        });
+
+        let bookedSet = new Set();
+        if (hasDateFilter) {
+            const vehicleIds = vehicles.map((v) => v.id);
+            const overlapping = await prisma.booking.findMany({
+                where: {
+                    vehicleId: { in: vehicleIds },
+                    status: { not: "CANCELLED" },
+                    AND: [
+                        { pickupDate: { lte: returnDate } },
+                        { returnDate: { gte: pickupDate } },
+                    ],
+                },
+                select: { vehicleId: true },
+            });
+            bookedSet = new Set(overlapping.map((b) => b.vehicleId));
+        }
+
+        const rows = vehicles.map((v) => ({
+            id: v.id,
+            name: buildVehicleName(v),
+            dailyPrice: v.dailyPrice,
+            seatingCapacity: v.seatingCapacity,
+            transmission: v.transmission?.value || null,
+            category: v.category?.value || null,
+            availabilityStatus: bookedSet.has(v.id) ? "NOT_AVAILABLE" : "AVAILABLE",
+        }));
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            data: { vehicles: rows },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
 
