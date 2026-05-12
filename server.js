@@ -2,6 +2,7 @@ import dotenv from 'dotenv/config';
 import express from 'express';
 import http from "http";
 import cors from 'cors';
+import cookieParser from "cookie-parser";
 import prisma from "./utils/db.js";
 import mainRouter from "./routes/index.routes.js";
 import { errorMiddleware } from './middlewares/error.middleware.js';
@@ -9,6 +10,10 @@ import { initSocket } from "./utils/socket.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// COOKIE AUTH IMPLEMENTED
+// Needed so secure cookies work correctly behind proxies (Render, Nginx, etc.)
+app.set("trust proxy", 1);
 
 // Stripe webhook raw body (before cors/json)
 app.use("/api/bookings/webhook", express.raw({ type: "application/json" }));
@@ -40,6 +45,7 @@ app.use(
     }),
 );
 app.use(express.json());
+app.use(cookieParser());
 app.use("/api", mainRouter);
 app.get("/", (req, res) => res.send(`
 <h1>RentWheels api working! :)</h1>

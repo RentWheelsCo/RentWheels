@@ -21,10 +21,10 @@ router.post("/webhook", express.raw({ type: "application/json" }), handleStripeW
 
 router.get("/as-owner", authMiddleware, getBookingsForMyListings);
 router.get("/my", authMiddleware, getMyBookings);
+router.get("/my-vehicles", authMiddleware, getMyVehiclesAvailability);
 router.get("/:id", authMiddleware, getBookingById);
 router.post("/:id/cancel", authMiddleware, cancelBooking);
 router.post("/:id/return", authMiddleware, returnBooking);
-router.get("/my-vehicles", authMiddleware, getMyVehiclesAvailability);
 
 export default router;
 

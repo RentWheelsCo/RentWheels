@@ -7,9 +7,9 @@ import { StatusCodes } from "http-status-codes";
  */
 export const authMiddleware = (req, res, next) => {
     try {
-        const authHeader = req.headers.authorization;
-
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        // COOKIE AUTH IMPLEMENTED
+        const token = req.cookies?.authToken;
+        if (!token) {
             return res.status(StatusCodes.UNAUTHORIZED).json({
                 success: false,
                 status: StatusCodes.UNAUTHORIZED,
@@ -17,11 +17,8 @@ export const authMiddleware = (req, res, next) => {
             });
         }
 
-        const token = authHeader.split(" ")[1];
-
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            console.log('AUTH DEBUG:', decoded);
             req.user = decoded;
             next();
         } catch (err) {

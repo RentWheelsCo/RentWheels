@@ -1,5 +1,5 @@
 import express from "express";
-import { register, login, getProfile, googleLogin, forgotPassword, resetPassword, uploadUserDocuments } from "../controller/auth.controller.js";
+import { register, login, logout, getProfile, googleLogin, forgotPassword, resetPassword, uploadUserDocuments } from "../controller/auth.controller.js";
 import { adminCreateUser, adminUpdateUser, adminDeleteUser, adminGetAllUsers, adminGetUserById } from "../controller/admin.controller.js";
 import { authMiddleware, authorizeRoles } from "../middlewares/auth.middleware.js";
 import { uploadFields } from "../middlewares/upload.middleware.js";
@@ -9,6 +9,7 @@ const router = express.Router();
 
 router.post("/register", uploadFields, register);
 router.post("/login", login);
+router.post("/logout", logout);
 router.post("/google", validateGoogleLogin, googleLogin);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);

@@ -16,11 +16,49 @@ const generateToken = (user) => {
     );
 };
 
+function getAuthCookieOptions(req) {
+    // COOKIE AUTH IMPLEMENTED
+    // IMPORTANT:
+    // - In production/https, cookie must be secure.
+    // - In local dev over http://localhost, secure cookies are dropped by the browser.
+    const isHttps =
+        Boolean(req?.secure) ||
+        String(req?.headers?.["x-forwarded-proto"] || "").toLowerCase() === "https";
+    const isProd = process.env.NODE_ENV === "production";
+
+    return {
+        httpOnly: true,
+        secure: isProd ? true : isHttps,
+        sameSite: "strict",
+        path: "/",
+        maxAge: 1000 * 60 * 60 * 24, // 24h
+    };
+}
+
+function toUserData(user) {
+    return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isVerified: user.isVerified,
+    };
+}
+
 const createResetToken = () => {
     const rawToken = crypto.randomBytes(32).toString("hex");
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
     return { rawToken, hashedToken };
 };
+
+function generateOtp6() {
+    // OTP must be 6 digits, allow leading zeros
+    return String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
+}
+
+function hashOtp(otp) {
+    return crypto.createHash("sha256").update(String(otp)).digest("hex");
+}
 
 export const register = async (req, res, next) => {
     try {
@@ -62,20 +100,10 @@ export const register = async (req, res, next) => {
         });
 
         const token = generateToken(user);
+        res.cookie("authToken", token, getAuthCookieOptions(req));
 
-        res.status(StatusCodes.CREATED).json({
-            success: true,
-            status: StatusCodes.CREATED,
-            message: "User registered successfully",
-            data: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                isVerified: user.isVerified,
-                token,
-            },
-        });
+        // <!-- FULL API INTEGRATION ADDED -->
+        return res.status(StatusCodes.CREATED).json({ success: true, user: toUserData(user) });
     } catch (error) {
         next(error);
     }
@@ -116,20 +144,20 @@ export const login = async (req, res, next) => {
         }
 
         const token = generateToken(user);
+        res.cookie("authToken", token, getAuthCookieOptions(req));
 
-        res.status(StatusCodes.OK).json({
-            success: true,
-            status: StatusCodes.OK,
-            message: "Login successful",
-            data: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                isVerified: user.isVerified,
-                token,
-            },
-        });
+        // <!-- FULL API INTEGRATION ADDED -->
+        return res.status(StatusCodes.OK).json({ success: true, user: toUserData(user) });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const logout = async (req, res, next) => {
+    try {
+        // COOKIE AUTH IMPLEMENTED
+        res.clearCookie("authToken", { ...getAuthCookieOptions(req), maxAge: undefined });
+        return res.status(StatusCodes.OK).json({ success: true });
     } catch (error) {
         next(error);
     }
@@ -211,20 +239,10 @@ export const googleLogin = async (req, res, next) => {
         }
 
         const token = generateToken(user);
+        res.cookie("authToken", token, getAuthCookieOptions(req));
 
-        return res.status(StatusCodes.OK).json({
-            success: true,
-            status: StatusCodes.OK,
-            message: "Google login successful",
-            data: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                isVerified: user.isVerified,
-                token,
-            },
-        });
+        // <!-- FULL API INTEGRATION ADDED -->
+        return res.status(StatusCodes.OK).json({ success: true, user: toUserData(user) });
     } catch (error) {
         next(error);
     }
@@ -245,7 +263,7 @@ export const forgotPassword = async (req, res, next) => {
                 status: StatusCodes.OK,
                 message: isDev
                     ? `No account found for ${parsed.email}.`
-                    : "If the email exists, a reset link has been sent.",
+                    : "If the email exists, an OTP has been sent.",
             });
         }
 
@@ -257,8 +275,10 @@ export const forgotPassword = async (req, res, next) => {
             });
         }
 
-        const { rawToken, hashedToken } = createResetToken();
-        const expires = new Date(Date.now() + 1000 * 60 * 15);
+        // OTP FLOW (frontend)
+        const otp = generateOtp6();
+        const hashedToken = hashOtp(otp);
+        const expires = new Date(Date.now() + 1000 * 60 * 10); // 10 minutes
 
         await prisma.user.update({
             where: { id: user.id },
@@ -268,15 +288,12 @@ export const forgotPassword = async (req, res, next) => {
             },
         });
 
-        const appUrl = process.env.APP_URL || "http://localhost:3000";
-        const resetUrl = `${appUrl.replace(/\/$/, "")}/reset-password?token=${rawToken}`;
-
-        const subject = "Reset your password";
-        const text = `You requested a password reset. Use this link to reset your password: ${resetUrl}. This link will expire in 15 minutes.`;
+        const subject = "Your RentWheels OTP Code";
+        const text = `Your OTP code is: ${otp}. It will expire in 10 minutes.`;
         const html = `
-            <p>You requested a password reset.</p>
-            <p><a href="${resetUrl}">Click here to reset your password</a></p>
-            <p>This link will expire in 15 minutes.</p>
+            <p>Your OTP code is:</p>
+            <p style="font-size:20px;font-weight:700;letter-spacing:2px;">${otp}</p>
+            <p>This code will expire in 10 minutes.</p>
         `;
 
         try {
@@ -308,11 +325,11 @@ export const forgotPassword = async (req, res, next) => {
             success: true,
             status: StatusCodes.OK,
             message: isDev
-                ? `Reset link sent to ${user.email}.`
-                : "If the email exists, a reset link has been sent.",
+                ? `OTP sent to ${user.email}.`
+                : "If the email exists, an OTP has been sent.",
         };
         if (isDev) {
-            body.data = { resetToken: rawToken };
+            body.data = { otp };
         }
         return res.status(StatusCodes.OK).json(body);
     } catch (error) {
@@ -324,10 +341,11 @@ export const resetPassword = async (req, res, next) => {
     try {
         const parsed = resetPasswordSchema.parse(req.body);
 
-        const hashedToken = crypto.createHash("sha256").update(parsed.token).digest("hex");
+        const hashedToken = hashOtp(parsed.otp);
 
         const user = await prisma.user.findFirst({
             where: {
+                email: parsed.email,
                 resetPasswordToken: hashedToken,
                 resetPasswordExpires: {
                     gt: new Date(),
@@ -339,7 +357,7 @@ export const resetPassword = async (req, res, next) => {
             return res.status(StatusCodes.BAD_REQUEST).json({
                 success: false,
                 status: StatusCodes.BAD_REQUEST,
-                message: "Invalid or expired reset token.",
+                message: "Invalid or expired OTP.",
             });
         }
 
