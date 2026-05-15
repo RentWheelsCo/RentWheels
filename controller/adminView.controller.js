@@ -240,3 +240,93 @@ export const adminGetAllVehicles = async (req, res, next) => {
     next(error);
   }
 };
+
+export const adminGetVehicleById = async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(StatusCodes.BAD_REQUEST).json({
+        success: false,
+        status: StatusCodes.BAD_REQUEST,
+        message: "Invalid vehicle id.",
+      });
+    }
+
+    const vehicleRaw = await prisma.vehicle.findUnique({
+      where: { id },
+      include: {
+        owner: {
+          select: { id: true, name: true, email: true, phone: true, role: true },
+        },
+        type: true,
+        brand: true,
+        model: true,
+        category: true,
+        transmission: true,
+        fuelType: true,
+        location: true,
+      },
+    });
+
+    if (!vehicleRaw) {
+      return res.status(StatusCodes.NOT_FOUND).json({
+        success: false,
+        status: StatusCodes.NOT_FOUND,
+        message: "Vehicle not found.",
+      });
+    }
+
+    const [activeBooking, commentsPayload] = await Promise.all([
+      prisma.booking.findFirst({
+        where: {
+          vehicleId: id,
+          status: { not: "CANCELLED" },
+        },
+        orderBy: { createdAt: "desc" },
+        include: {
+          renter: { select: { id: true, name: true, email: true, phone: true } },
+        },
+      }),
+      prisma.comment.findMany({
+        where: { vehicleId: id, parentId: null },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        include: {
+          user: { select: { id: true, name: true, profilePhoto: true } },
+          _count: { select: { likes: true, replies: true } },
+        },
+      }),
+    ]);
+
+    return res.status(StatusCodes.OK).json({
+      success: true,
+      status: StatusCodes.OK,
+      data: {
+        vehicle: mapVehicle(vehicleRaw),
+        activeBooking: activeBooking
+          ? {
+              id: activeBooking.id,
+              status: activeBooking.status,
+              pickupDate: activeBooking.pickupDate,
+              returnDate: activeBooking.returnDate,
+              insuranceType: activeBooking.insuranceType,
+              createdAt: activeBooking.createdAt,
+              renter: activeBooking.renter,
+            }
+          : null,
+        comments: commentsPayload.map((c) => ({
+          id: c.id,
+          content: c.content,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+          user: c.user,
+          likeCount: c._count?.likes ?? 0,
+          replyCount: c._count?.replies ?? 0,
+          parentId: c.parentId || null,
+        })),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};

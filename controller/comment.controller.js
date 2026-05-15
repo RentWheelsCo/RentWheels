@@ -4,6 +4,7 @@ import {
     createCommentSchema,
     replyCommentSchema,
     listCommentsSchema,
+    updateCommentSchema,
 } from "../validations/comment.validation.js";
 import { notifyUser } from "../utils/notification.js";
 
@@ -340,6 +341,106 @@ export const unlikeComment = async (req, res, next) => {
             success: true,
             status: StatusCodes.OK,
             message: "Comment unliked successfully.",
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const updateComment = async (req, res, next) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Invalid comment id.",
+            });
+        }
+
+        const parsed = updateCommentSchema.parse(req.body);
+
+        const existing = await prisma.comment.findUnique({
+            where: { id },
+            select: { id: true, userId: true, vehicleId: true },
+        });
+        if (!existing) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "Comment not found.",
+            });
+        }
+
+        const canEdit =
+            req.user?.role === "admin" || existing.userId === req.user?.id;
+        if (!canEdit) {
+            return res.status(StatusCodes.FORBIDDEN).json({
+                success: false,
+                status: StatusCodes.FORBIDDEN,
+                message: "You can only edit your own comment.",
+            });
+        }
+
+        const updated = await prisma.comment.update({
+            where: { id },
+            data: { content: parsed.content },
+            include: {
+                user: { select: selectUser },
+                _count: { select: { likes: true, replies: true } },
+            },
+        });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            message: "Comment updated successfully.",
+            data: serializeComment(updated),
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+export const deleteComment = async (req, res, next) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Invalid comment id.",
+            });
+        }
+
+        const existing = await prisma.comment.findUnique({
+            where: { id },
+            select: { id: true, userId: true },
+        });
+        if (!existing) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "Comment not found.",
+            });
+        }
+
+        const canDelete =
+            req.user?.role === "admin" || existing.userId === req.user?.id;
+        if (!canDelete) {
+            return res.status(StatusCodes.FORBIDDEN).json({
+                success: false,
+                status: StatusCodes.FORBIDDEN,
+                message: "You can only delete your own comment.",
+            });
+        }
+
+        await prisma.comment.delete({ where: { id } });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            message: "Comment deleted successfully.",
         });
     } catch (error) {
         next(error);

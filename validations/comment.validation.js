@@ -14,3 +14,7 @@ export const listCommentsSchema = z.object({
     page: z.coerce.number().int().positive().optional(),
     pageSize: z.coerce.number().int().positive().max(100).optional(),
 });
+
+export const updateCommentSchema = z.object({
+    content: z.string().trim().min(1).max(1000),
+});

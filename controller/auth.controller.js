@@ -17,10 +17,6 @@ const generateToken = (user) => {
 };
 
 function getAuthCookieOptions(req) {
-    // COOKIE AUTH IMPLEMENTED
-    // IMPORTANT:
-    // - In production/https, cookie must be secure.
-    // - In local dev over http://localhost, secure cookies are dropped by the browser.
     const isHttps =
         Boolean(req?.secure) ||
         String(req?.headers?.["x-forwarded-proto"] || "").toLowerCase() === "https";
@@ -102,7 +98,6 @@ export const register = async (req, res, next) => {
         const token = generateToken(user);
         res.cookie("authToken", token, getAuthCookieOptions(req));
 
-        // <!-- FULL API INTEGRATION ADDED -->
         return res.status(StatusCodes.CREATED).json({ success: true, user: toUserData(user) });
     } catch (error) {
         next(error);
@@ -146,7 +141,6 @@ export const login = async (req, res, next) => {
         const token = generateToken(user);
         res.cookie("authToken", token, getAuthCookieOptions(req));
 
-        // <!-- FULL API INTEGRATION ADDED -->
         return res.status(StatusCodes.OK).json({ success: true, user: toUserData(user) });
     } catch (error) {
         next(error);
