@@ -21,11 +21,21 @@ function getAuthCookieOptions(req) {
         Boolean(req?.secure) ||
         String(req?.headers?.["x-forwarded-proto"] || "").toLowerCase() === "https";
     const isProd = process.env.NODE_ENV === "production";
+    const sameSite = String(process.env.COOKIE_SAMESITE || "strict").toLowerCase();
+    const cookieSameSite =
+        sameSite === "none" ? "none" : sameSite === "lax" ? "lax" : "strict";
+    const secureOverride = process.env.COOKIE_SECURE;
+    const cookieSecure =
+        secureOverride !== undefined
+            ? String(secureOverride).toLowerCase() === "true"
+            : cookieSameSite === "none"
+                ? true
+                : (isProd ? true : isHttps);
 
     return {
         httpOnly: true,
-        secure: isProd ? true : isHttps,
-        sameSite: "strict",
+        secure: cookieSecure,
+        sameSite: cookieSameSite,
         path: "/",
         maxAge: 1000 * 60 * 60 * 24, // 24h
     };
@@ -98,7 +108,7 @@ export const register = async (req, res, next) => {
         const token = generateToken(user);
         res.cookie("authToken", token, getAuthCookieOptions(req));
 
-        return res.status(StatusCodes.CREATED).json({ success: true, user: toUserData(user) });
+        return res.status(StatusCodes.CREATED).json({ success: true, token, user: toUserData(user) });
     } catch (error) {
         next(error);
     }
@@ -141,7 +151,7 @@ export const login = async (req, res, next) => {
         const token = generateToken(user);
         res.cookie("authToken", token, getAuthCookieOptions(req));
 
-        return res.status(StatusCodes.OK).json({ success: true, user: toUserData(user) });
+        return res.status(StatusCodes.OK).json({ success: true, token, user: toUserData(user) });
     } catch (error) {
         next(error);
     }
@@ -236,7 +246,7 @@ export const googleLogin = async (req, res, next) => {
         res.cookie("authToken", token, getAuthCookieOptions(req));
 
         // <!-- FULL API INTEGRATION ADDED -->
-        return res.status(StatusCodes.OK).json({ success: true, user: toUserData(user) });
+        return res.status(StatusCodes.OK).json({ success: true, token, user: toUserData(user) });
     } catch (error) {
         next(error);
     }

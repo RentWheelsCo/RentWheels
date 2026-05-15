@@ -1,14 +1,30 @@
 import jwt from "jsonwebtoken";
 import { StatusCodes } from "http-status-codes";
 
+function readBearerToken(authorizationHeader) {
+    const raw = String(authorizationHeader || "").trim();
+    if (!raw) return null;
+
+    const parts = raw.split(/\s+/);
+    if (parts.length < 2) return null;
+
+    const [scheme, token] = parts;
+    if (!scheme || !token) return null;
+    if (scheme.toLowerCase() !== "bearer") return null;
+    return token.trim() || null;
+}
+
+function getTokenFromRequest(req) {
+    return req.cookies?.authToken || readBearerToken(req.headers?.authorization);
+}
+
 /**
  * Authentication middleware.
  * Validates token
  */
 export const authMiddleware = (req, res, next) => {
     try {
-        // COOKIE AUTH IMPLEMENTED
-        const token = req.cookies?.authToken;
+        const token = getTokenFromRequest(req);
         if (!token) {
             return res.status(StatusCodes.UNAUTHORIZED).json({
                 success: false,
@@ -34,6 +50,24 @@ export const authMiddleware = (req, res, next) => {
             status: StatusCodes.INTERNAL_SERVER_ERROR,
             message: "Something went wrong in authentication middleware.",
         });
+    }
+};
+
+
+export const optionalAuthMiddleware = (req, _res, next) => {
+    try {
+        const token = getTokenFromRequest(req);
+        if (!token) return next();
+
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            req.user = decoded;
+        } catch {
+            // ignore invalid/expired token for optional auth
+        }
+        return next();
+    } catch {
+        return next();
     }
 };
 

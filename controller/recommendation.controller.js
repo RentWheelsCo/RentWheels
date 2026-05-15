@@ -9,41 +9,14 @@ export const getVehicleRecommendations = async (req, res, next) => {
     const limit = Math.min(Number(parsed.limit || 10), 20);
     const explain = Boolean(parsed.explain);
     const useAI = parsed.useAI !== undefined ? Boolean(parsed.useAI) : true;
+    const userId = req.user?.id || null;
 
     const hasDateFilter = Boolean(parsed.pickupDate || parsed.returnDate);
     const pickupDate = hasDateFilter ? new Date(parsed.pickupDate || parsed.returnDate) : null;
     const returnDate = hasDateFilter ? new Date(parsed.returnDate || parsed.pickupDate) : null;
 
-    const recentBookings = await prisma.booking.findMany({
-      where: {
-        renterId: req.user.id,
-        status: { not: "CANCELLED" },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      include: {
-        vehicle: {
-          select: {
-            id: true,
-            typeId: true,
-            brandId: true,
-            modelId: true,
-            categoryId: true,
-            transmissionId: true,
-            fuelTypeId: true,
-            locationId: true,
-            dailyPrice: true,
-            seatingCapacity: true,
-          },
-        },
-      },
-    });
-    const bookingVehicles = recentBookings.map((b) => b.vehicle).filter(Boolean);
-    const signals = buildUserVehicleSignals(bookingVehicles);
-
-    const where = {
-      ownerId: { not: req.user.id },
-    };
+    const where = {};
+    if (userId) where.ownerId = { not: userId };
     if (parsed.locationId) where.locationId = parsed.locationId;
     if (parsed.minPrice !== undefined || parsed.maxPrice !== undefined) {
       where.dailyPrice = {};
@@ -94,9 +67,52 @@ export const getVehicleRecommendations = async (req, res, next) => {
       locationId: parsed.locationId ?? null,
     };
 
+    // Public mode: no auth -> generic recent vehicles (no AI, no signals).
+    if (!userId) {
+      return res.status(StatusCodes.OK).json({
+        success: true,
+        status: StatusCodes.OK,
+        data: {
+          aiUsed: false,
+          cached: false,
+          constraints,
+          signals: null,
+          vehicles: candidatePool.slice(0, limit),
+          rationales: null,
+        },
+      });
+    }
+
+    const recentBookings = await prisma.booking.findMany({
+      where: {
+        renterId: userId,
+        status: { not: "CANCELLED" },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      include: {
+        vehicle: {
+          select: {
+            id: true,
+            typeId: true,
+            brandId: true,
+            modelId: true,
+            categoryId: true,
+            transmissionId: true,
+            fuelTypeId: true,
+            locationId: true,
+            dailyPrice: true,
+            seatingCapacity: true,
+          },
+        },
+      },
+    });
+    const bookingVehicles = recentBookings.map((b) => b.vehicle).filter(Boolean);
+    const signals = buildUserVehicleSignals(bookingVehicles);
+
     const picked = useAI
       ? await pickRecommendations({
-          userId: req.user.id,
+          userId,
           limit,
           userSignals: signals,
           candidates: candidatePool,
@@ -138,4 +154,3 @@ export const getVehicleRecommendations = async (req, res, next) => {
     next(error);
   }
 };
-

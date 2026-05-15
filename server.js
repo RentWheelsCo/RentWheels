@@ -10,6 +10,7 @@ import { initSocket } from "./utils/socket.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const isProd = process.env.NODE_ENV === "production";
 
 // COOKIE AUTH IMPLEMENTED
 // Needed so secure cookies work correctly behind proxies (Render, Nginx, etc.)
@@ -36,7 +37,14 @@ const allowedOrigins = new Set([...(corsOrigins.length ? corsOrigins : defaultOr
 app.use(
     cors({
         origin(origin, cb) {
-            if (!origin || allowedOrigins.has(origin)) {
+            // Allow same-origin/no-origin requests, and allow "null" origin for local file:// dev
+            if (!origin) {
+                return cb(null, true);
+            }
+            if (origin === "null" && !isProd) {
+                return cb(null, true);
+            }
+            if (allowedOrigins.has(origin)) {
                 return cb(null, true);
             }
             return cb(null, false);

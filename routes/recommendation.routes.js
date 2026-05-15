@@ -1,10 +1,10 @@
 import express from "express";
-import { authMiddleware } from "../middlewares/auth.middleware.js";
+import { optionalAuthMiddleware } from "../middlewares/auth.middleware.js";
 import { getVehicleRecommendations } from "../controller/recommendation.controller.js";
 
 const router = express.Router();
 
-router.get("/vehicles", authMiddleware, getVehicleRecommendations);
+// Public endpoint: uses personalization when authenticated, otherwise returns generic recommendations.
+router.get("/vehicles", optionalAuthMiddleware, getVehicleRecommendations);
 
 export default router;
-
