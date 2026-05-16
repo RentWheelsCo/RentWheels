@@ -188,6 +188,7 @@ export const getProfile = async (req, res, next) => {
                 id: user.id,
                 name: user.name,
                 email: user.email,
+                role: user.role,
                 profilePhoto: user.profilePhoto,
                 licensePhoto: user.licensePhoto
                     ? JSON.parse(user.licensePhoto)
