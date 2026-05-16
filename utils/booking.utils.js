@@ -11,19 +11,19 @@ export const calcBookingDays = (pickupDate, returnDate) => {
 
 /**
  * Calculate total booking amount = (dailyPrice * days) + insurance fee
- * Insurance: BASIC=0, STANDARD=10% dailyPrice, PREMIUM=20% dailyPrice (per booking)
+ * Insurance: NO_INSURANCE=0, HALF_INSURANCE=2.5%, FULL_INSURANCE=5% (per day)
  */
 export const calculateTotalAmount = (vehicleDailyPrice, pickupDate, returnDate, insuranceType) => {
   const days = calcBookingDays(pickupDate, returnDate);
   let insuranceMultiplier = 0;
-  switch (insuranceType.toUpperCase()) {
-    case 'STANDARD':
-      insuranceMultiplier = 0.1;
+  switch (String(insuranceType || "").toUpperCase()) {
+    case 'HALF_INSURANCE':
+      insuranceMultiplier = 0.025;
       break;
-    case 'PREMIUM':
-      insuranceMultiplier = 0.2;
+    case 'FULL_INSURANCE':
+      insuranceMultiplier = 0.05;
       break;
-    case 'BASIC':
+    case 'NO_INSURANCE':
     default:
       insuranceMultiplier = 0;
   }

@@ -3,6 +3,7 @@ import { authMiddleware } from "../middlewares/auth.middleware.js";
 import {
     createPaymentSession,
     handleStripeWebhook,
+    confirmBookingBySession,
     getMyBookings,
     getMyVehiclesAvailability,
     getBookingsForMyListings,
@@ -18,6 +19,7 @@ router.post("/checkout", authMiddleware, createPaymentSession);
 
 // Stripe webhook
 router.post("/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
+router.post("/confirm-session", authMiddleware, confirmBookingBySession);
 
 router.get("/as-owner", authMiddleware, getBookingsForMyListings);
 router.get("/my", authMiddleware, getMyBookings);

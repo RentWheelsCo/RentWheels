@@ -67,6 +67,7 @@ model Vehicle {
   dailyPrice      Float
   seatingCapacity Int
   description     String?
+  availabilityStatus String @default("AVAILABLE")
   photos          String[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt

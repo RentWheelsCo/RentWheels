@@ -211,7 +211,7 @@ export const adminGetAllVehicles = async (req, res, next) => {
           by: ["vehicleId"],
           where: {
             vehicleId: { in: ids },
-            status: { not: "CANCELLED" },
+            status: "CONFIRMED",
           },
           _count: { _all: true },
         })
@@ -280,7 +280,7 @@ export const adminGetVehicleById = async (req, res, next) => {
       prisma.booking.findFirst({
         where: {
           vehicleId: id,
-          status: { not: "CANCELLED" },
+          status: "CONFIRMED",
         },
         orderBy: { createdAt: "desc" },
         include: {

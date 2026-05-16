@@ -42,7 +42,7 @@ export const createPaymentSession = async (req, res, next) => {
         const conflicts = await prisma.booking.findFirst({
             where: {
                 vehicleId: vehicle.id,
-                status: { not: "CANCELLED" },
+                status: "CONFIRMED",
                 AND: [
                     { pickupDate: { lte: returnDate } },
                     { returnDate: { gte: pickupDate } },
@@ -95,7 +95,6 @@ export const createPaymentSession = async (req, res, next) => {
 
         console.log('Payment created:', payment.id);
 
-        // Create Stripe session AFTER payment record
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ["card"],
             line_items: [{
@@ -109,8 +108,8 @@ export const createPaymentSession = async (req, res, next) => {
                 quantity: 1,
             }],
             mode: "payment",
-            success_url: `${process.env.STRIPE_SUCCESS_URL || 'http://localhost:3000/success'}&session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: process.env.STRIPE_CANCEL_URL || 'http://localhost:3000/cancel',
+            success_url: process.env.STRIPE_SUCCESS_URL || 'http://localhost:5500/payment-success.html?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url: process.env.STRIPE_CANCEL_URL || 'http://localhost:5500/payment-cancel.html',
             metadata: {
                 bookingId: booking.id.toString(),
             },
@@ -118,7 +117,6 @@ export const createPaymentSession = async (req, res, next) => {
 
         console.log('Stripe session:', session.id);
 
-        // UPDATE payment with session ID (nullable field)
         await prisma.payment.update({
             where: { id: payment.id },
             data: {
@@ -183,11 +181,88 @@ export const handleStripeWebhook = async (req, res) => {
                     data: { status: "CONFIRMED" },
                 });
             });
-            console.log(`✅ Booking ${bookingId} confirmed!`);
+            console.log(`Booking ${bookingId} confirmed!`);
         }
     }
 
     res.status(200).json({ received: true });
+};
+
+export const confirmBookingBySession = async (req, res, next) => {
+    try {
+        const sessionId = String(req.query.session_id || "").trim();
+        if (!sessionId) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "session_id is required.",
+            });
+        }
+
+        const payment = await prisma.payment.findFirst({
+            where: { stripeCheckoutSession: sessionId },
+            include: { booking: true },
+        });
+
+        if (!payment || !payment.booking) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "Payment session not found.",
+            });
+        }
+
+        if (payment.booking.renterId !== req.user.id && req.user.role !== "admin") {
+            return res.status(StatusCodes.FORBIDDEN).json({
+                success: false,
+                status: StatusCodes.FORBIDDEN,
+                message: "Forbidden.",
+            });
+        }
+
+        if (payment.booking.status === "CONFIRMED" || payment.booking.status === "COMPLETED") {
+            return res.status(StatusCodes.OK).json({
+                success: true,
+                status: StatusCodes.OK,
+                message: "Booking already confirmed.",
+                data: { bookingId: payment.bookingId, status: payment.booking.status },
+            });
+        }
+
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        const isPaid = session?.payment_status === "paid";
+        if (!isPaid) {
+            return res.status(StatusCodes.OK).json({
+                success: true,
+                status: StatusCodes.OK,
+                message: "Payment not completed.",
+                data: { bookingId: payment.bookingId, status: payment.booking.status },
+            });
+        }
+
+        await prisma.$transaction(async (tx) => {
+            await tx.payment.update({
+                where: { id: payment.id },
+                data: {
+                    status: "succeeded",
+                    stripePaymentIntent: String(session.payment_intent || payment.stripePaymentIntent || ""),
+                },
+            });
+            await tx.booking.update({
+                where: { id: payment.bookingId },
+                data: { status: "CONFIRMED" },
+            });
+        });
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            message: "Booking confirmed.",
+            data: { bookingId: payment.bookingId, status: "CONFIRMED" },
+        });
+    } catch (error) {
+        next(error);
+    }
 };
 
 export const getMyBookings = async (req, res, next) => {
@@ -195,11 +270,15 @@ export const getMyBookings = async (req, res, next) => {
         const page = parsePositiveInt(req.query.page, 1);
         const limit = Math.min(parsePositiveInt(req.query.limit, 20), 100);
         const skip = (page - 1) * limit;
+        const where = {
+            renterId: req.user.id,
+            status: { in: ["CONFIRMED", "COMPLETED", "CANCELLED"] },
+        };
 
         const [total, bookingsRaw] = await Promise.all([
-            prisma.booking.count({ where: { renterId: req.user.id } }),
+            prisma.booking.count({ where }),
             prisma.booking.findMany({
-                where: { renterId: req.user.id },
+                where,
                 orderBy: { createdAt: "desc" },
                 skip,
                 take: limit,
@@ -508,7 +587,7 @@ export const getMyVehiclesAvailability = async (req, res, next) => {
             const overlapping = await prisma.booking.findMany({
                 where: {
                     vehicleId: { in: vehicleIds },
-                    status: { not: "CANCELLED" },
+                    status: "CONFIRMED",
                     AND: [
                         { pickupDate: { lte: returnDate } },
                         { returnDate: { gte: pickupDate } },
@@ -519,15 +598,21 @@ export const getMyVehiclesAvailability = async (req, res, next) => {
             bookedSet = new Set(overlapping.map((b) => b.vehicleId));
         }
 
-        const rows = vehicles.map((v) => ({
-            id: v.id,
-            name: buildVehicleName(v),
-            dailyPrice: v.dailyPrice,
-            seatingCapacity: v.seatingCapacity,
-            transmission: v.transmission?.value || null,
-            category: v.category?.value || null,
-            availabilityStatus: bookedSet.has(v.id) ? "NOT_AVAILABLE" : "AVAILABLE",
-        }));
+        const rows = vehicles.map((v) => {
+            const manualUnavailable =
+                String(v.availabilityStatus || "AVAILABLE").toUpperCase() === "NOT_AVAILABLE";
+            const bookedInRange = hasDateFilter ? bookedSet.has(v.id) : false;
+            const notAvailable = manualUnavailable || bookedInRange;
+            return {
+                id: v.id,
+                name: buildVehicleName(v),
+                dailyPrice: v.dailyPrice,
+                seatingCapacity: v.seatingCapacity,
+                transmission: v.transmission?.value || null,
+                category: v.category?.value || null,
+                availabilityStatus: notAvailable ? "NOT_AVAILABLE" : "AVAILABLE",
+            };
+        });
 
         return res.status(StatusCodes.OK).json({
             success: true,

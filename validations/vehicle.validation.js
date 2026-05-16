@@ -36,6 +36,7 @@ export const updateVehicleSchema = z.object({
     dailyPrice: z.coerce.number().positive().optional(),
     seatingCapacity: z.coerce.number().int().positive().optional(),
     description: z.string().trim().max(2000).optional(),
+    availabilityStatus: z.enum(["AVAILABLE", "NOT_AVAILABLE"]).optional(),
 });
 
 export const createVehicleOptionSchema = z.object({

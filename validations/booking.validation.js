@@ -5,7 +5,7 @@ const dateString = z.string().refine((value) => {
     return !Number.isNaN(d.getTime());
 }, { message: "Invalid date format." });
 
-export const INSURANCE_TYPES = ["BASIC", "STANDARD", "PREMIUM"];
+export const INSURANCE_TYPES = ["NO_INSURANCE", "HALF_INSURANCE", "FULL_INSURANCE"];
 export const insuranceTypeEnum = z.enum(INSURANCE_TYPES);
 
 export const createBookingSchema = z.object({
