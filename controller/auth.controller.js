@@ -20,10 +20,13 @@ function getAuthCookieOptions(req) {
     const isHttps =
         Boolean(req?.secure) ||
         String(req?.headers?.["x-forwarded-proto"] || "").toLowerCase() === "https";
+
     const isProd = process.env.NODE_ENV === "production";
-    const sameSite = String(process.env.COOKIE_SAMESITE || "strict").toLowerCase();
+
+    const sameSite = isProd ? "none" : String(process.env.COOKIE_SAMESITE || "strict").toLowerCase();
     const cookieSameSite =
         sameSite === "none" ? "none" : sameSite === "lax" ? "lax" : "strict";
+
     const secureOverride = process.env.COOKIE_SECURE;
     const cookieSecure =
         secureOverride !== undefined
