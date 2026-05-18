@@ -2,13 +2,16 @@ import prisma from "../utils/db.js";
 import { StatusCodes } from "http-status-codes";
 import { vehicleRecommendationQuerySchema } from "../validations/recommendation.validation.js";
 import { buildUserVehicleSignals, pickRecommendations } from "../utils/recommendation.utils.js";
+import { isGeminiConfigured } from "../utils/gemini.js";
 
 export const getVehicleRecommendations = async (req, res, next) => {
   try {
     const parsed = vehicleRecommendationQuerySchema.parse(req.query);
     const limit = Math.min(Number(parsed.limit || 10), 20);
     const explain = Boolean(parsed.explain);
-    const useAI = parsed.useAI !== undefined ? Boolean(parsed.useAI) : true;
+    // Only use AI by default if it's actually configured; otherwise keep it fast.
+    const useAI =
+      parsed.useAI !== undefined ? Boolean(parsed.useAI) : Boolean(isGeminiConfigured());
     const userId = req.user?.id || null;
 
     const hasDateFilter = Boolean(parsed.pickupDate || parsed.returnDate);
@@ -23,38 +26,49 @@ export const getVehicleRecommendations = async (req, res, next) => {
       if (parsed.minPrice !== undefined) where.dailyPrice.gte = parsed.minPrice;
       if (parsed.maxPrice !== undefined) where.dailyPrice.lte = parsed.maxPrice;
     }
+    if (hasDateFilter && pickupDate && returnDate) {
+      // Exclude vehicles with non-cancelled overlaps in the requested range.
+      where.bookings = {
+        none: {
+          status: { not: "CANCELLED" },
+          AND: [{ pickupDate: { lte: returnDate } }, { returnDate: { gte: pickupDate } }],
+        },
+      };
+    }
 
     const rawCandidates = await prisma.vehicle.findMany({
       where,
       orderBy: { createdAt: "desc" },
-      take: 60,
-      include: {
-        type: true,
-        brand: true,
-        model: true,
-        category: true,
-        transmission: true,
-        fuelType: true,
-        location: true,
-        owner: {
-          select: { id: true, name: true, email: true },
-        },
+      take: 40,
+      select: {
+        id: true,
+        ownerId: true,
+        typeId: true,
+        brandId: true,
+        modelId: true,
+        categoryId: true,
+        transmissionId: true,
+        fuelTypeId: true,
+        locationId: true,
+        year: true,
+        dailyPrice: true,
+        seatingCapacity: true,
+        description: true,
+        availabilityStatus: true,
+        photos: true,
+        createdAt: true,
+        type: { select: { id: true, type: true, value: true } },
+        brand: { select: { id: true, type: true, value: true } },
+        model: { select: { id: true, type: true, value: true, parentId: true } },
+        category: { select: { id: true, type: true, value: true } },
+        transmission: { select: { id: true, type: true, value: true } },
+        fuelType: { select: { id: true, type: true, value: true } },
+        location: { select: { id: true, type: true, value: true } },
+        owner: { select: { id: true, name: true, email: true } },
       },
     });
 
     let candidates = rawCandidates;
-    if (hasDateFilter && pickupDate && returnDate && candidates.length) {
-      const overlapping = await prisma.booking.findMany({
-        where: {
-          vehicleId: { in: candidates.map((v) => v.id) },
-          status: { not: "CANCELLED" },
-          AND: [{ pickupDate: { lte: returnDate } }, { returnDate: { gte: pickupDate } }],
-        },
-        select: { vehicleId: true },
-      });
-      const bookedSet = new Set(overlapping.map((b) => b.vehicleId));
-      candidates = candidates.filter((v) => !bookedSet.has(v.id));
-    }
 
     // Keep the prompt small and the key usage efficient.
     const candidatePool = candidates.slice(0, 30);

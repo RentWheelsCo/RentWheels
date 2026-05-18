@@ -308,20 +308,44 @@ export const getMyBookings = async (req, res, next) => {
                 orderBy: { createdAt: "desc" },
                 skip,
                 take: limit,
-                include: {
+                select: {
+                    id: true,
+                    pickupDate: true,
+                    returnDate: true,
+                    insuranceType: true,
+                    status: true,
+                    createdAt: true,
+                    updatedAt: true,
                     vehicle: {
-                        include: {
-                            type: true,
-                            brand: true,
-                            model: true,
-                            category: true,
-                            transmission: true,
-                            fuelType: true,
-                            location: true,
+                        select: {
+                            id: true,
+                            ownerId: true,
+                            year: true,
+                            dailyPrice: true,
+                            seatingCapacity: true,
+                            description: true,
+                            availabilityStatus: true,
+                            photos: true,
+                            type: { select: { id: true, type: true, value: true } },
+                            brand: { select: { id: true, type: true, value: true } },
+                            model: { select: { id: true, type: true, value: true, parentId: true } },
+                            category: { select: { id: true, type: true, value: true } },
+                            transmission: { select: { id: true, type: true, value: true } },
+                            fuelType: { select: { id: true, type: true, value: true } },
+                            location: { select: { id: true, type: true, value: true } },
                             owner: { select: { id: true, name: true, email: true, phone: true } },
                         },
                     },
-                    payment: true,
+                    payment: {
+                        select: {
+                            id: true,
+                            amount: true,
+                            currency: true,
+                            status: true,
+                            stripeCheckoutSession: true,
+                            stripePaymentIntent: true,
+                        },
+                    },
                 },
             }),
         ]);
@@ -380,20 +404,23 @@ export const getBookingsForMyListings = async (req, res, next) => {
                 take: limit,
                 include: {
                     renter: { select: { id: true, name: true, email: true, phone: true } },
-                    vehicle: { select: { id: true, photos: true, dailyPrice: true, year: true, ownerId: true } },
+                    vehicle: {
+                        include: {
+                            type: true,
+                            brand: true,
+                            model: true,
+                            category: true,
+                            transmission: true,
+                            fuelType: true,
+                            location: true,
+                        },
+                    },
                 },
             }),
         ]);
 
-        const vehicleIds = Array.from(new Set(bookingsRaw.map((b) => b.vehicleId)));
-        const vehiclesFull = await prisma.vehicle.findMany({
-            where: { id: { in: vehicleIds } },
-            include: { brand: true, model: true, type: true, category: true, transmission: true, fuelType: true, location: true },
-        });
-        const vById = new Map(vehiclesFull.map((v) => [v.id, v]));
-
         const bookings = bookingsRaw.map((b) => {
-            const v = vById.get(b.vehicleId);
+            const v = b.vehicle || null;
             return {
                 id: b.id,
                 pickupDate: b.pickupDate,
@@ -404,7 +431,7 @@ export const getBookingsForMyListings = async (req, res, next) => {
                 updatedAt: b.updatedAt,
                 totalAmount: v ? calculateTotalAmount(v.dailyPrice, b.pickupDate, b.returnDate, b.insuranceType) : 0,
                 renter: b.renter,
-                vehicle: v ? { ...v, photos: b.vehicle?.photos || v.photos, name: buildVehicleName(v) } : null,
+                vehicle: v ? { ...v, name: buildVehicleName(v) } : null,
             };
         });
 
@@ -593,27 +620,12 @@ export const getMyVehiclesAvailability = async (req, res, next) => {
         const returnDate = parsed.data.returnDate ? new Date(parsed.data.returnDate) : null;
         const hasDateFilter = Boolean(pickupDate && returnDate);
 
-        const vehicles = await prisma.vehicle.findMany({
-            where: { ownerId: req.user.id },
-            orderBy: { createdAt: "desc" },
-            include: {
-                type: true,
-                brand: true,
-                model: true,
-                category: true,
-                transmission: true,
-                fuelType: true,
-                location: true,
-            },
-        });
-
         let bookedSet = new Set();
         if (hasDateFilter) {
-            const vehicleIds = vehicles.map((v) => v.id);
             const overlapping = await prisma.booking.findMany({
                 where: {
-                    vehicleId: { in: vehicleIds },
                     status: "CONFIRMED",
+                    vehicle: { ownerId: req.user.id },
                     AND: [
                         { pickupDate: { lte: returnDate } },
                         { returnDate: { gte: pickupDate } },
@@ -623,6 +635,22 @@ export const getMyVehiclesAvailability = async (req, res, next) => {
             });
             bookedSet = new Set(overlapping.map((b) => b.vehicleId));
         }
+
+        const vehicles = await prisma.vehicle.findMany({
+            where: { ownerId: req.user.id },
+            orderBy: { createdAt: "desc" },
+            select: {
+                id: true,
+                dailyPrice: true,
+                seatingCapacity: true,
+                availabilityStatus: true,
+                type: { select: { value: true } },
+                brand: { select: { value: true } },
+                model: { select: { value: true } },
+                category: { select: { value: true } },
+                transmission: { select: { value: true } },
+            },
+        });
 
         const rows = vehicles.map((v) => {
             const manualUnavailable =

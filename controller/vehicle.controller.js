@@ -190,53 +190,57 @@ export const getVehicles = async (req, res, next) => {
             if (parsed.minPrice !== undefined) where.dailyPrice.gte = parsed.minPrice;
             if (parsed.maxPrice !== undefined) where.dailyPrice.lte = parsed.maxPrice;
         }
-
-        const vehicles = await prisma.vehicle.findMany({
-            where,
-            orderBy: { createdAt: "desc" },
-            skip,
-            take: limit,
-            include: {
-                type: true,
-                brand: true,
-                model: true,
-                category: true,
-                transmission: true,
-                fuelType: true,
-                location: true,
-                owner: {
-                    select: { id: true, name: true, email: true },
-                },
-            },
-        });
-
-        let bookedSet = new Set();
         if (hasDateFilter && pickupDate && returnDate) {
-            const vehicleIds = vehicles.map((vehicle) => vehicle.id);
-            const overlapping = await prisma.booking.findMany({
-                where: {
-                    vehicleId: { in: vehicleIds },
+            where.bookings = {
+                none: {
                     status: "CONFIRMED",
                     AND: [
                         { pickupDate: { lte: returnDate } },
                         { returnDate: { gte: pickupDate } },
                     ],
                 },
-                select: { vehicleId: true },
-            });
-            bookedSet = new Set(overlapping.map((b) => b.vehicleId));
+            };
         }
+
+        const vehicles = await prisma.vehicle.findMany({
+            where,
+            orderBy: { createdAt: "desc" },
+            skip,
+            take: limit,
+            select: {
+                id: true,
+                ownerId: true,
+                typeId: true,
+                brandId: true,
+                modelId: true,
+                categoryId: true,
+                transmissionId: true,
+                fuelTypeId: true,
+                locationId: true,
+                year: true,
+                dailyPrice: true,
+                seatingCapacity: true,
+                description: true,
+                availabilityStatus: true,
+                photos: true,
+                createdAt: true,
+                updatedAt: true,
+                type: { select: { id: true, type: true, value: true } },
+                brand: { select: { id: true, type: true, value: true } },
+                model: { select: { id: true, type: true, value: true, parentId: true } },
+                category: { select: { id: true, type: true, value: true } },
+                transmission: { select: { id: true, type: true, value: true } },
+                fuelType: { select: { id: true, type: true, value: true } },
+                location: { select: { id: true, type: true, value: true } },
+                owner: { select: { id: true, name: true, email: true } },
+            },
+        });
 
         const vehiclesWithAvailability = vehicles.map((vehicle) => {
             const manualUnavailable =
                 String(vehicle.availabilityStatus || "AVAILABLE").toUpperCase() === "NOT_AVAILABLE";
-            const bookedInRange = hasDateFilter ? bookedSet.has(vehicle.id) : false;
-            const notAvailable = manualUnavailable || bookedInRange;
-            return {
-                ...vehicle,
-                isAvailable: !notAvailable,
-                availabilityStatus: notAvailable ? "NOT_AVAILABLE" : "AVAILABLE",
-            };
+            // If a date filter was provided, confirmed overlaps were already excluded in the query.
+            return { ...vehicle, isAvailable: !manualUnavailable };
         });
 
         return res.status(StatusCodes.OK).json({
@@ -312,17 +316,32 @@ export const getMyVehicles = async (req, res, next) => {
             orderBy: { createdAt: "desc" },
             skip,
             take: limit,
-            include: {
-                type: true,
-                brand: true,
-                model: true,
-                category: true,
-                transmission: true,
-                fuelType: true,
-                location: true,
-                owner: {
-                    select: { id: true, name: true, email: true, phone: true },
-                },
+            select: {
+                id: true,
+                ownerId: true,
+                typeId: true,
+                brandId: true,
+                modelId: true,
+                categoryId: true,
+                transmissionId: true,
+                fuelTypeId: true,
+                locationId: true,
+                year: true,
+                dailyPrice: true,
+                seatingCapacity: true,
+                description: true,
+                availabilityStatus: true,
+                photos: true,
+                createdAt: true,
+                updatedAt: true,
+                type: { select: { id: true, type: true, value: true } },
+                brand: { select: { id: true, type: true, value: true } },
+                model: { select: { id: true, type: true, value: true, parentId: true } },
+                category: { select: { id: true, type: true, value: true } },
+                transmission: { select: { id: true, type: true, value: true } },
+                fuelType: { select: { id: true, type: true, value: true } },
+                location: { select: { id: true, type: true, value: true } },
+                owner: { select: { id: true, name: true, email: true, phone: true } },
             },
         });
 
