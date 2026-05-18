@@ -9,6 +9,23 @@ import { mapBookingToDashboardRow, calculateTotalAmount } from "../utils/booking
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 
+function getFxRateNprPerUsd() {
+    const raw = process.env.NPR_PER_USD ?? process.env.STRIPE_NPR_PER_USD ?? "";
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 133;
+}
+
+function toStripeAmount({ amountNpr, chargeCurrency }) {
+    const currency = String(chargeCurrency || "usd").toLowerCase();
+    if (currency === "usd") {
+        const nprPerUsd = getFxRateNprPerUsd();
+        const amountUsd = Number(amountNpr || 0) / nprPerUsd;
+        return { currency: "usd", unitAmount: Math.round(amountUsd * 100), fxRate: nprPerUsd };
+    }
+    // If you set STRIPE_CHARGE_CURRENCY to a supported currency, we assume your prices are already in that currency.
+    return { currency, unitAmount: Math.round(Number(amountNpr || 0) * 100), fxRate: null };
+}
+
 export const createPaymentSession = async (req, res, next) => {
     try {
         const parsed = createCheckoutBookingSchema.parse(req.body);
@@ -82,13 +99,16 @@ export const createPaymentSession = async (req, res, next) => {
 
         console.log('Booking created:', booking.id);
 
-        const totalAmount = calculateTotalAmount(vehicle.dailyPrice, pickupDate, returnDate, parsed.insuranceType);
+        const totalAmountNpr = calculateTotalAmount(vehicle.dailyPrice, pickupDate, returnDate, parsed.insuranceType);
+
+        const chargeCurrency = process.env.STRIPE_CHARGE_CURRENCY || "usd";
+        const stripeAmount = toStripeAmount({ amountNpr: totalAmountNpr, chargeCurrency });
 
         const payment = await prisma.payment.create({
             data: {
                 bookingId: booking.id,
-                amount: totalAmount,
-                currency: "usd",
+                amount: totalAmountNpr,
+                currency: "npr",
                 status: "pending",
             },
         });
@@ -99,11 +119,12 @@ export const createPaymentSession = async (req, res, next) => {
             payment_method_types: ["card"],
             line_items: [{
                 price_data: {
-                    currency: "usd",
+                    currency: stripeAmount.currency,
                     product_data: {
                         name: `RentWheels Booking - Vehicle ${vehicle.id}`,
                     },
-                    unit_amount: Math.round(totalAmount * 100),
+                    // Stripe uses the smallest currency unit (cents for USD).
+                    unit_amount: Math.max(1, stripeAmount.unitAmount),
                 },
                 quantity: 1,
             }],
@@ -112,6 +133,9 @@ export const createPaymentSession = async (req, res, next) => {
             cancel_url: process.env.STRIPE_CANCEL_URL || 'http://localhost:5500/payment-cancel.html',
             metadata: {
                 bookingId: booking.id.toString(),
+                amountNpr: String(totalAmountNpr),
+                chargeCurrency: String(stripeAmount.currency),
+                fxRateNprPerUsd: stripeAmount.fxRate ? String(stripeAmount.fxRate) : "",
             },
         });
 
@@ -129,7 +153,9 @@ export const createPaymentSession = async (req, res, next) => {
             message: "Stripe Checkout ready!",
             data: {
                 bookingId: booking.id,
-                totalAmount,
+                totalAmount: totalAmountNpr,
+                displayCurrency: "NPR",
+                chargeCurrency: stripeAmount.currency.toUpperCase(),
                 stripeUrl: session.url
             },
         });
