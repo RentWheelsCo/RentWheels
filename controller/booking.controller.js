@@ -22,8 +22,168 @@ function toStripeAmount({ amountNpr, chargeCurrency }) {
         const amountUsd = Number(amountNpr || 0) / nprPerUsd;
         return { currency: "usd", unitAmount: Math.round(amountUsd * 100), fxRate: nprPerUsd };
     }
-    // If you set STRIPE_CHARGE_CURRENCY to a supported currency, we assume your prices are already in that currency.
     return { currency, unitAmount: Math.round(Number(amountNpr || 0) * 100), fxRate: null };
+}
+
+async function notifyVehicleOwnerBooked(bookingId) {
+    if (!Number.isInteger(bookingId) || bookingId <= 0) return;
+
+    const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
+        include: {
+            renter: { select: { name: true, email: true, phone: true } },
+            vehicle: {
+                include: {
+                    owner: { select: { email: true } },
+                    type: true,
+                    brand: true,
+                    model: true,
+                    category: true,
+                    transmission: true,
+                    fuelType: true,
+                    location: true,
+                },
+            },
+            payment: true,
+        },
+    });
+    if (!booking?.vehicle?.ownerId) return;
+
+    const formatDate = (d) => {
+        try {
+            return new Intl.DateTimeFormat("en-US", {
+                year: "numeric",
+                month: "long",
+                day: "2-digit",
+            }).format(d);
+        } catch {
+            return d ? new Date(d).toDateString() : "";
+        }
+    };
+
+    const vehicleName = booking.vehicle ? buildVehicleName(booking.vehicle) : `Vehicle #${booking.vehicleId}`;
+    const pickup = formatDate(booking.pickupDate);
+    const dropoff = formatDate(booking.returnDate);
+    const renterName = booking.renter?.name || "A user";
+    const renterEmail = booking.renter?.email || "N/A";
+    const renterPhone = booking.renter?.phone || "N/A";
+    const amount = booking.payment?.amount;
+    const currency = (booking.payment?.currency || "NPR").toUpperCase();
+    const amountText =
+        typeof amount === "number" && Number.isFinite(amount)
+            ? `${currency} ${amount.toFixed(2)}`
+            : "N/A";
+
+    const subject = `Your vehicle has been booked (Booking #${booking.id})`;
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${subject}</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f6f7fb;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+    <div style="max-width:640px;margin:0 auto;padding:24px;">
+      <div style="background:#ffffff;border:1px solid #eef2ff;border-radius:14px;overflow:hidden;">
+        <div style="padding:18px 20px;background:#1d4ed8;color:#ffffff;">
+          <div style="font-size:16px;font-weight:700;letter-spacing:0.2px;">RentWheels</div>
+          <div style="margin-top:6px;font-size:13px;opacity:0.9;">Booking Notification</div>
+        </div>
+        <div style="padding:20px;">
+          <p style="margin:0 0 14px 0;font-size:14px;line-height:1.6;">
+            Dear Vehicle Owner,
+          </p>
+          <p style="margin:0 0 16px 0;font-size:14px;line-height:1.6;">
+            Your vehicle has been booked successfully. Below are the booking details for your reference.
+          </p>
+
+          <div style="border:1px solid #f3f4f6;border-radius:10px;overflow:hidden;">
+            <div style="padding:12px 14px;background:#f8fafc;border-bottom:1px solid #f3f4f6;">
+              <span style="font-size:13px;font-weight:700;">Booking Details</span>
+            </div>
+            <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#374151;width:40%;border-bottom:1px solid #f3f4f6;">Booking ID</td>
+                <td style="padding:10px 14px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6;">#${booking.id}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#374151;width:40%;border-bottom:1px solid #f3f4f6;">Vehicle</td>
+                <td style="padding:10px 14px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6;">${vehicleName}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#374151;width:40%;border-bottom:1px solid #f3f4f6;">Pick-up Date</td>
+                <td style="padding:10px 14px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6;">${pickup}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#374151;width:40%;border-bottom:1px solid #f3f4f6;">Return Date</td>
+                <td style="padding:10px 14px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6;">${dropoff}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#374151;width:40%;border-bottom:1px solid #f3f4f6;">Insurance Type</td>
+                <td style="padding:10px 14px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6;">${booking.insuranceType || "N/A"}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#374151;width:40%;">Total Amount</td>
+                <td style="padding:10px 14px;font-size:13px;font-weight:600;color:#111827;">${amountText}</td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="height:14px;"></div>
+
+          <div style="border:1px solid #f3f4f6;border-radius:10px;overflow:hidden;">
+            <div style="padding:12px 14px;background:#f8fafc;border-bottom:1px solid #f3f4f6;">
+              <span style="font-size:13px;font-weight:700;">Renter Details</span>
+            </div>
+            <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#374151;width:40%;border-bottom:1px solid #f3f4f6;">Name</td>
+                <td style="padding:10px 14px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6;">${renterName}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#374151;width:40%;border-bottom:1px solid #f3f4f6;">Email</td>
+                <td style="padding:10px 14px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #f3f4f6;">${renterEmail}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 14px;font-size:13px;color:#374151;width:40%;">Phone</td>
+                <td style="padding:10px 14px;font-size:13px;font-weight:600;color:#111827;">${renterPhone}</td>
+              </tr>
+            </table>
+          </div>
+
+          <p style="margin:16px 0 0 0;font-size:12px;line-height:1.6;color:#6b7280;">
+            If you did not expect this booking or you need help, please contact RentWheels support.
+          </p>
+        </div>
+        <div style="padding:14px 20px;background:#f8fafc;border-top:1px solid #f3f4f6;font-size:11px;color:#6b7280;">
+          This is an automated email. Please do not reply to this message.
+        </div>
+      </div>
+    </div>
+  </body>
+</html>`;
+
+    try {
+        await notifyUser({
+            userId: booking.vehicle.ownerId,
+            type: "VEHICLE_BOOKED",
+            title: "Your vehicle has been booked",
+            message: "Your vehicle has been booked.",
+            email: booking.vehicle.owner?.email
+                ? {
+                      to: booking.vehicle.owner.email,
+                      subject,
+                      text: `Your vehicle has been booked.\n\nBooking ID: #${booking.id}\nVehicle: ${vehicleName}\nPick-up Date: ${pickup}\nReturn Date: ${dropoff}\nInsurance: ${booking.insuranceType || "N/A"}\nTotal Amount: ${amountText}\n\nRenter: ${renterName}\nEmail: ${renterEmail}\nPhone: ${renterPhone}`,
+                      html,
+                  }
+                : null,
+        });
+    } catch (notifyError) {
+        console.error(
+            "Failed to send booking notification:",
+            notifyError?.message || notifyError
+        );
+    }
 }
 
 export const createPaymentSession = async (req, res, next) => {
@@ -207,6 +367,7 @@ export const handleStripeWebhook = async (req, res) => {
                     data: { status: "CONFIRMED" },
                 });
             });
+            await notifyVehicleOwnerBooked(bookingId);
             console.log(`Booking ${bookingId} confirmed!`);
         }
     }
@@ -279,6 +440,8 @@ export const confirmBookingBySession = async (req, res, next) => {
                 data: { status: "CONFIRMED" },
             });
         });
+
+        await notifyVehicleOwnerBooked(payment.bookingId);
 
         return res.status(StatusCodes.OK).json({
             success: true,

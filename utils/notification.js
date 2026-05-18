@@ -39,12 +39,22 @@ export const notifyUser = async ({ userId, type, title, message, email }) => {
 
     // Email notification
     if (email) {
-        const text = message || title;
-        const html = message ? `<p>${message}</p>` : `<p>${title}</p>`;
+        const emailOpts =
+            typeof email === "string"
+                ? { to: email, subject: title, text: message || title, html: null }
+                : {
+                      to: email?.to,
+                      subject: email?.subject || title,
+                      text: email?.text || message || title,
+                      html: email?.html || null,
+                  };
+
+        const html =
+            emailOpts.html || (message ? `<p>${message}</p>` : `<p>${title}</p>`);
         await safeSendEmail({
-            to: email,
-            subject: title,
-            text,
+            to: emailOpts.to,
+            subject: emailOpts.subject,
+            text: emailOpts.text,
             html,
         });
     }
