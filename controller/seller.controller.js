@@ -10,10 +10,14 @@ export const getSellerDashboard = async (req, res, next) => {
         start12Months.setHours(0, 0, 0, 0);
         start12Months.setMonth(start12Months.getMonth() - 12);
 
-        const [totalVehicles, totalBookings] = await Promise.all([
+        const [totalVehicles, totalBookings, activeBookings, pendingBookings] = await Promise.all([
             prisma.vehicle.count({ where: { ownerId: req.user.id } }),
+            prisma.booking.count({ where: { vehicle: { ownerId: req.user.id } } }),
             prisma.booking.count({
-                where: { vehicle: { ownerId: req.user.id } },
+                where: { status: "CONFIRMED", vehicle: { ownerId: req.user.id } },
+            }),
+            prisma.booking.count({
+                where: { status: "PENDING", vehicle: { ownerId: req.user.id } },
             }),
         ]);
 
@@ -68,6 +72,8 @@ export const getSellerDashboard = async (req, res, next) => {
             data: {
                 totalVehicles,
                 totalBookings,
+                activeBookings,
+                pendingBookings,
                 recentBookings,
                 monthlyRevenue,
             },

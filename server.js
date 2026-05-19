@@ -28,16 +28,20 @@ const defaultOrigins = [
     "http://127.0.0.1:3000",
     "http://localhost:5500",
     "http://127.0.0.1:5500",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
     "http://localhost:5000",
 ];
-const allowedOrigins = new Set([...(corsOrigins.length ? corsOrigins : defaultOrigins), process.env.APP_URL].filter(Boolean));
+const allowedOrigins = new Set(
+    [
+        ...(corsOrigins.length ? corsOrigins : defaultOrigins),
+        process.env.APP_URL,
+        process.env.FRONTEND_URL,
+        process.env.BASE_URL,
+    ].filter(Boolean),
+);
 
 app.use(
     cors({
         origin(origin, cb) {
-            // Allow same-origin/no-origin requests, and allow "null" origin for local file:// dev
             if (!origin) {
                 return cb(null, true);
             }

@@ -6,6 +6,19 @@ import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema 
 import crypto from 'crypto';
 import { OAuth2Client } from "google-auth-library";
 import { sendEmail } from "../utils/email.js";
+
+function getGoogleAudiences() {
+    const ids = String(
+        process.env.GOOGLE_CLIENT_IDS ||
+        process.env.GOOGLE_CLIENT_ID ||
+        "",
+    )
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    return ids;
+}
+
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const generateToken = (user) => {
@@ -208,13 +221,29 @@ export const getProfile = async (req, res, next) => {
 export const googleLogin = async (req, res, next) => {
     try {
         const { idToken } = req.body;
+        const audiences = getGoogleAudiences();
+        if (!audiences.length) {
+            return res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
+                success: false,
+                status: StatusCodes.INTERNAL_SERVER_ERROR,
+                message: "Google login is not configured (missing GOOGLE_CLIENT_ID).",
+            });
+        }
 
         const ticket = await client.verifyIdToken({
             idToken,
-            audience: process.env.GOOGLE_CLIENT_ID,
+            audience: audiences,
         });
 
         const payload = ticket.getPayload();
+        if (!payload) {
+            return res.status(StatusCodes.UNAUTHORIZED).json({
+                success: false,
+                status: StatusCodes.UNAUTHORIZED,
+                message: "Invalid Google token payload.",
+            });
+        }
+
         const { email, email_verified, name, sub } = payload;
 
         if (!email || !email_verified) {
