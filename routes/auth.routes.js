@@ -10,7 +10,10 @@ const router = express.Router();
 router.post("/register", uploadFields, register);
 router.post("/login", login);
 router.post("/logout", logout);
-router.post("/google", validateGoogleLogin, googleLogin);
+router.post("/google", (req, res, next) => {
+    console.log("[route] POST /api/auth/google");
+    next();
+}, validateGoogleLogin, googleLogin);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
 router.patch("/documents", authMiddleware, uploadFields, uploadUserDocuments);

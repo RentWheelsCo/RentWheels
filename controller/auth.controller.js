@@ -220,6 +220,12 @@ export const getProfile = async (req, res, next) => {
 
 export const googleLogin = async (req, res, next) => {
     try {
+        console.log("[auth/google] hit", {
+            hasIdToken: Boolean(req?.body?.idToken),
+            origin: req.headers?.origin,
+            userAgent: req.headers?.["user-agent"],
+        });
+
         const { idToken } = req.body;
         const audiences = getGoogleAudiences();
         if (!audiences.length) {
