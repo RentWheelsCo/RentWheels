@@ -1,7 +1,7 @@
 import { calcBookingDays } from "./booking.utils.js";
 
 /**
- * Buckets non-cancelled booking totals by calendar month of pickup (same logic for renter spend and host revenue).
+ * Group valid booking earnings/spending month-wise based on pickup date.
  */
 export const aggregateMonthlyBookingTotals = (bookings, monthsBack = 12) => {
     const now = new Date();

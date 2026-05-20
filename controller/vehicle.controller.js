@@ -184,7 +184,9 @@ export const getVehicles = async (req, res, next) => {
             ? new Date(parsed.returnDate || parsed.pickupDate)
             : null;
 
-        const where = {};
+        const where = {
+            availabilityStatus: "AVAILABLE",
+        };
         if (parsed.minPrice !== undefined || parsed.maxPrice !== undefined) {
             where.dailyPrice = {};
             if (parsed.minPrice !== undefined) where.dailyPrice.gte = parsed.minPrice;
@@ -287,6 +289,16 @@ export const getVehicleById = async (req, res, next) => {
         });
 
         if (!vehicle) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "Vehicle not found.",
+            });
+        }
+
+        const manualUnavailable =
+            String(vehicle.availabilityStatus || "AVAILABLE").toUpperCase() === "NOT_AVAILABLE";
+        if (manualUnavailable) {
             return res.status(StatusCodes.NOT_FOUND).json({
                 success: false,
                 status: StatusCodes.NOT_FOUND,
@@ -502,7 +514,40 @@ export const deleteVehicle = async (req, res, next) => {
             });
         }
 
-        await prisma.vehicle.delete({ where: { id } });
+        // Delete dependents first to avoid foreign-key violations (P2003) when bookings/comments exist.
+        await prisma.$transaction(async (tx) => {
+            const bookings = await tx.booking.findMany({
+                where: { vehicleId: id },
+                select: { id: true },
+            });
+            const bookingIds = bookings.map((b) => b.id);
+
+            if (bookingIds.length > 0) {
+                await tx.payment.deleteMany({
+                    where: { bookingId: { in: bookingIds } },
+                });
+                await tx.booking.deleteMany({
+                    where: { vehicleId: id },
+                });
+            }
+
+            const comments = await tx.comment.findMany({
+                where: { vehicleId: id },
+                select: { id: true },
+            });
+            const commentIds = comments.map((c) => c.id);
+
+            if (commentIds.length > 0) {
+                await tx.commentLike.deleteMany({
+                    where: { commentId: { in: commentIds } },
+                });
+                await tx.comment.deleteMany({
+                    where: { vehicleId: id },
+                });
+            }
+
+            await tx.vehicle.delete({ where: { id } });
+        });
 
         return res.status(StatusCodes.OK).json({
             success: true,
@@ -535,6 +580,16 @@ export const getVehicleOwnerContact = async (req, res, next) => {
         });
 
         if (!vehicle) {
+            return res.status(StatusCodes.NOT_FOUND).json({
+                success: false,
+                status: StatusCodes.NOT_FOUND,
+                message: "Vehicle not found.",
+            });
+        }
+
+        const manualUnavailable =
+            String(vehicle.availabilityStatus || "AVAILABLE").toUpperCase() === "NOT_AVAILABLE";
+        if (manualUnavailable) {
             return res.status(StatusCodes.NOT_FOUND).json({
                 success: false,
                 status: StatusCodes.NOT_FOUND,

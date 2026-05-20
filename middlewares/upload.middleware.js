@@ -11,7 +11,12 @@ cloudinary.config({
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: async (req, file) => {
-        const folder = file.fieldname === "vehiclePhotos" ? "vehicles" : "users";
+        const folder =
+            file.fieldname === "vehiclePhotos"
+                ? "vehicles"
+                : file.fieldname === "commentImage"
+                    ? "comments"
+                    : "users";
         return {
             folder,
             resource_type: "image",
@@ -41,3 +46,4 @@ export const uploadFields = upload.fields([
 ]);
 
 export const uploadVehiclePhotos = upload.array("vehiclePhotos", 10);
+export const uploadCommentImage = upload.single("commentImage");

@@ -32,7 +32,6 @@ export const calculateTotalAmount = (vehicleDailyPrice, pickupDate, returnDate, 
   return baseAmount + insuranceAmount;
 };
 
-/** Shared shape for seller/buyer dashboard "recent booking" rows. */
 export const mapBookingToDashboardRow = (booking) => {
   const days = calcBookingDays(booking.pickupDate, booking.returnDate);
   const totalAmount = days * booking.vehicle.dailyPrice;

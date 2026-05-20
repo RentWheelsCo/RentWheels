@@ -22,6 +22,7 @@ const selectUser = {
 const serializeComment = (comment) => ({
     id: comment.id,
     content: comment.content,
+    image: comment.image || null,
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
     user: comment.user,
@@ -33,6 +34,16 @@ const serializeComment = (comment) => ({
 export const createComment = async (req, res, next) => {
     try {
         const parsed = createCommentSchema.parse(req.body);
+        const content = String(parsed.content || "").trim();
+        const image = req.file?.path ? String(req.file.path) : null;
+
+        if (!content && !image) {
+            return res.status(StatusCodes.BAD_REQUEST).json({
+                success: false,
+                status: StatusCodes.BAD_REQUEST,
+                message: "Comment text or image is required.",
+            });
+        }
 
         const vehicle = await prisma.vehicle.findUnique({
             where: { id: parsed.vehicleId },
@@ -77,7 +88,8 @@ export const createComment = async (req, res, next) => {
                 vehicleId: parsed.vehicleId,
                 userId: req.user.id,
                 parentId: parsed.parentId || null,
-                content: parsed.content,
+                content,
+                image,
             },
             include: {
                 user: { select: selectUser },

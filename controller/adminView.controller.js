@@ -183,6 +183,7 @@ export const adminGetAllVehicles = async (req, res, next) => {
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(parsePositiveInt(req.query.limit, 20), 100);
     const skip = (page - 1) * limit;
+    const now = new Date();
 
     const [total, vehiclesRaw] = await Promise.all([
       prisma.vehicle.count(),
@@ -206,24 +207,50 @@ export const adminGetAllVehicles = async (req, res, next) => {
     ]);
 
     const ids = vehiclesRaw.map((v) => v.id);
-    const activeCountsRaw = ids.length
-      ? await prisma.booking.groupBy({
-          by: ["vehicleId"],
-          where: {
+    const activeWhere =
+      ids.length
+        ? {
             vehicleId: { in: ids },
             status: "CONFIRMED",
-          },
-          _count: { _all: true },
-        })
-      : [];
+            pickupDate: { lte: now },
+            returnDate: { gte: now },
+          }
+        : null;
+
+    const [activeCountsRaw, activeBookingsRaw] = await Promise.all([
+      activeWhere
+        ? prisma.booking.groupBy({
+            by: ["vehicleId"],
+            where: activeWhere,
+            _count: { _all: true },
+          })
+        : [],
+      activeWhere
+        ? prisma.booking.findMany({
+            where: activeWhere,
+            orderBy: { createdAt: "desc" },
+            include: {
+              renter: { select: { id: true, name: true, email: true, phone: true } },
+            },
+          })
+        : [],
+    ]);
 
     const activeCountByVehicleId = new Map(
       activeCountsRaw.map((row) => [row.vehicleId, row._count?._all ?? 0])
     );
 
+    const activeRenterByVehicleId = new Map();
+    for (const booking of activeBookingsRaw) {
+      if (!activeRenterByVehicleId.has(booking.vehicleId)) {
+        activeRenterByVehicleId.set(booking.vehicleId, booking.renter || null);
+      }
+    }
+
     const vehicles = vehiclesRaw.map((vehicle) => ({
       ...mapVehicle(vehicle),
       activeBookingsCount: activeCountByVehicleId.get(vehicle.id) ?? 0,
+      activeRenter: activeRenterByVehicleId.get(vehicle.id) ?? null,
     }));
 
     return res.status(StatusCodes.OK).json({

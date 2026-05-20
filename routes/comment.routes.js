@@ -9,11 +9,12 @@ import {
     deleteComment,
 } from "../controller/comment.controller.js";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
+import { uploadCommentImage } from "../middlewares/upload.middleware.js";
 
 const router = express.Router();
 
 router.get("/vehicle/:vehicleId", getVehicleComments);
-router.post("/", authMiddleware, createComment);
+router.post("/", authMiddleware, uploadCommentImage, createComment);
 router.patch("/:id", authMiddleware, updateComment);
 router.delete("/:id", authMiddleware, deleteComment);
 router.post("/:id/reply", authMiddleware, replyToComment);

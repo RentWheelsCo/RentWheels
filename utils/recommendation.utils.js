@@ -85,11 +85,6 @@ const GeminiRecoSchema = z.object({
     .min(1),
 });
 
-// Gemini should return JSON (configured via responseMimeType).
-// We parse it directly as-is.
-
-
-
 const toPrompt = ({ limit, userSignals, candidates, constraints }) => {
   const topCounts = (map, max = 4) =>
     [...map.entries()]

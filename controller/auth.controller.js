@@ -130,6 +130,33 @@ export const register = async (req, res, next) => {
     }
 };
 
+export const checkEmail = async (req, res, next) => {
+    try {
+        const parsed = forgotPasswordSchema.parse(req.body);
+
+        const existingUser = await prisma.user.findUnique({
+            where: { email: parsed.email },
+            select: { id: true },
+        });
+
+        if (existingUser) {
+            return res.status(StatusCodes.CONFLICT).json({
+                success: false,
+                status: StatusCodes.CONFLICT,
+                message: "Email already exists",
+            });
+        }
+
+        return res.status(StatusCodes.OK).json({
+            success: true,
+            status: StatusCodes.OK,
+            message: "Email is available",
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
 export const login = async (req, res, next) => {
     try {
         const parsed = loginSchema.parse(req.body);
@@ -220,12 +247,6 @@ export const getProfile = async (req, res, next) => {
 
 export const googleLogin = async (req, res, next) => {
     try {
-        console.log("[auth/google] hit", {
-            hasIdToken: Boolean(req?.body?.idToken),
-            origin: req.headers?.origin,
-            userAgent: req.headers?.["user-agent"],
-        });
-
         const { idToken } = req.body;
         const audiences = getGoogleAudiences();
         if (!audiences.length) {
@@ -284,7 +305,6 @@ export const googleLogin = async (req, res, next) => {
         const token = generateToken(user);
         res.cookie("authToken", token, getAuthCookieOptions(req));
 
-        // <!-- FULL API INTEGRATION ADDED -->
         return res.status(StatusCodes.OK).json({ success: true, token, user: toUserData(user) });
     } catch (error) {
         next(error);
