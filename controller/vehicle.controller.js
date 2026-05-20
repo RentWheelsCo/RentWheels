@@ -176,6 +176,7 @@ export const getVehicles = async (req, res, next) => {
         const page = parsePositiveInt(parsed.page, 1);
         const limit = Math.min(parsePositiveInt(parsed.limit, 20), 50);
         const skip = (page - 1) * limit;
+        const lite = Boolean(parsed.lite);
         const hasDateFilter = Boolean(parsed.pickupDate || parsed.returnDate);
         const pickupDate = hasDateFilter
             ? new Date(parsed.pickupDate || parsed.returnDate)
@@ -204,38 +205,44 @@ export const getVehicles = async (req, res, next) => {
             };
         }
 
+        const selectLite = {
+            id: true,
+            ownerId: true,
+            typeId: true,
+            brandId: true,
+            modelId: true,
+            categoryId: true,
+            transmissionId: true,
+            fuelTypeId: true,
+            locationId: true,
+            year: true,
+            dailyPrice: true,
+            seatingCapacity: true,
+            availabilityStatus: true,
+            photos: true,
+            type: { select: { id: true, type: true, value: true } },
+            brand: { select: { id: true, type: true, value: true } },
+            model: { select: { id: true, type: true, value: true, parentId: true } },
+            category: { select: { id: true, type: true, value: true } },
+            transmission: { select: { id: true, type: true, value: true } },
+            fuelType: { select: { id: true, type: true, value: true } },
+            location: { select: { id: true, type: true, value: true } },
+        };
+
+        const selectFull = {
+            ...selectLite,
+            description: true,
+            createdAt: true,
+            updatedAt: true,
+            owner: { select: { id: true, name: true, email: true } },
+        };
+
         const vehicles = await prisma.vehicle.findMany({
             where,
             orderBy: { createdAt: "desc" },
             skip,
             take: limit,
-            select: {
-                id: true,
-                ownerId: true,
-                typeId: true,
-                brandId: true,
-                modelId: true,
-                categoryId: true,
-                transmissionId: true,
-                fuelTypeId: true,
-                locationId: true,
-                year: true,
-                dailyPrice: true,
-                seatingCapacity: true,
-                description: true,
-                availabilityStatus: true,
-                photos: true,
-                createdAt: true,
-                updatedAt: true,
-                type: { select: { id: true, type: true, value: true } },
-                brand: { select: { id: true, type: true, value: true } },
-                model: { select: { id: true, type: true, value: true, parentId: true } },
-                category: { select: { id: true, type: true, value: true } },
-                transmission: { select: { id: true, type: true, value: true } },
-                fuelType: { select: { id: true, type: true, value: true } },
-                location: { select: { id: true, type: true, value: true } },
-                owner: { select: { id: true, name: true, email: true } },
-            },
+            select: lite ? selectLite : selectFull,
         });
 
         const vehiclesWithAvailability = vehicles.map((vehicle) => {

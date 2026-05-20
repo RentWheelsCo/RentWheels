@@ -85,6 +85,42 @@ const GeminiRecoSchema = z.object({
     .min(1),
 });
 
+const normalizeJsonText = (text) => {
+  if (typeof text !== "string") return "";
+  let t = text.trim();
+
+  // Remove markdown code fences if the model included them.
+  t = t.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+  // If the model added extra text around JSON, try to slice out the JSON object.
+  const firstBrace = t.indexOf("{");
+  const lastBrace = t.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    t = t.slice(firstBrace, lastBrace + 1).trim();
+  }
+
+  return t;
+};
+
+const safeJsonParse = (text) => {
+  const normalized = normalizeJsonText(text);
+  if (!normalized) throw new Error("Gemini returned empty text.");
+
+  try {
+    return JSON.parse(normalized);
+  } catch (e) {
+    // Common failure: output got cut off mid-JSON. Try parsing up to the last closing brace.
+    const lastBrace = normalized.lastIndexOf("}");
+    if (lastBrace !== -1) {
+      const sliced = normalized.slice(0, lastBrace + 1);
+      try {
+        return JSON.parse(sliced);
+      } catch {}
+    }
+    throw e;
+  }
+};
+
 const toPrompt = ({ limit, userSignals, candidates, constraints }) => {
   const topCounts = (map, max = 4) =>
     [...map.entries()]
@@ -133,6 +169,7 @@ const toPrompt = ({ limit, userSignals, candidates, constraints }) => {
 };
 
 const recoCache = new Map(); // key -> { expiresAt:number, value:any }
+const geminiCooldown = new Map(); // key -> { until:number, reason:string }
 const getCache = (key) => {
   const hit = recoCache.get(key);
   if (!hit) return null;
@@ -144,6 +181,20 @@ const getCache = (key) => {
 };
 const setCache = (key, value, ttlMs) => {
   recoCache.set(key, { expiresAt: Date.now() + ttlMs, value });
+};
+
+const getCooldown = (key) => {
+  const hit = geminiCooldown.get(key);
+  if (!hit) return null;
+  if (Date.now() > hit.until) {
+    geminiCooldown.delete(key);
+    return null;
+  }
+  return hit;
+};
+
+const setCooldown = (key, ttlMs, reason) => {
+  geminiCooldown.set(key, { until: Date.now() + ttlMs, reason: String(reason || "") });
 };
 
 export const pickRecommendations = async ({
@@ -232,6 +283,22 @@ export const pickRecommendations = async ({
 
   const prompt = toPrompt({ limit, userSignals, candidates, constraints });
 
+  // If we recently hit quota/rate limits, don't keep hammering Gemini on every request.
+  // Serve fallback quickly until the cooldown expires.
+  const cooldownKey = "gemini-global";
+  const cooldown = getCooldown(cooldownKey);
+  if (cooldown) {
+    return {
+      aiUsed: false,
+      cached: true,
+      recommendations: fallbackRanked.slice(0, limit).map(({ v, s }) => ({
+        vehicleId: v.id,
+        score: clamp(s / 20, 0, 1),
+        rationale: undefined,
+      })),
+    };
+  }
+
   try {
     const text = await geminiGenerateText({
       prompt,
@@ -246,7 +313,7 @@ export const pickRecommendations = async ({
 
     let parsedJson;
     try {
-      parsedJson = JSON.parse(text);
+      parsedJson = safeJsonParse(text);
     } catch (e) {
       throw new Error(`Failed to JSON.parse Gemini text: ${String(e?.message || e)}`);
     }
@@ -270,6 +337,12 @@ export const pickRecommendations = async ({
     setCache(cacheKey, value, cacheTtlMs);
     return { aiUsed: true, cached: false, recommendations: cleaned };
   } catch (err) {
+    // Prevent repeated 429s from slowing the whole endpoint.
+    if (Number(err?.status) === 429 || String(err?.message || "").includes(" 429")) {
+      // Gemini often tells us a retry-after in the message; without parsing it,
+      // a short cooldown is enough to stop the spam.
+      setCooldown(cooldownKey, 45_000, err?.message || "quota exceeded");
+    }
     console.error("gemini failed; falling back", {
       userId,
       limit,
@@ -288,5 +361,3 @@ export const pickRecommendations = async ({
     };
   }
 };
-
-

@@ -86,10 +86,17 @@ const fetchJson = async (url, { method = "GET", headers = {}, body, timeoutMs = 
 };
 
 const extractText = (geminiResponse) => {
-  // Take the first text part
-  const textPart = geminiResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
+  // Gemini can return multiple text parts. If we only read parts[0], JSON outputs
+  // may look "truncated" and fail JSON.parse.
+  const parts = geminiResponse?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts) || parts.length === 0) return "";
 
-  return typeof textPart === "string" ? textPart : "";
+  const text = parts
+    .map((p) => (typeof p?.text === "string" ? p.text : ""))
+    .filter(Boolean)
+    .join("");
+
+  return typeof text === "string" ? text : "";
 };
 
 
@@ -182,4 +189,3 @@ export const geminiGenerateText = async ({
 
   return extracted;
 };
-

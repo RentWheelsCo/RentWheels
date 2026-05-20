@@ -7,6 +7,7 @@ import {
     updateCommentSchema,
 } from "../validations/comment.validation.js";
 import { notifyUser } from "../utils/notification.js";
+import { enqueueNotification } from "../utils/notification.queue.js";
 
 /**
  * Comment Controller
@@ -23,6 +24,7 @@ const serializeComment = (comment) => ({
     id: comment.id,
     content: comment.content,
     image: comment.image || null,
+    imageUploading: false,
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
     user: comment.user,
@@ -35,7 +37,9 @@ export const createComment = async (req, res, next) => {
     try {
         const parsed = createCommentSchema.parse(req.body);
         const content = String(parsed.content || "").trim();
+        // With Cloudinary storage, multer provides a URL as `req.file.path`.
         const image = req.file?.path ? String(req.file.path) : null;
+        const imageTmpPath = null;
 
         if (!content && !image) {
             return res.status(StatusCodes.BAD_REQUEST).json({
@@ -90,6 +94,7 @@ export const createComment = async (req, res, next) => {
                 parentId: parsed.parentId || null,
                 content,
                 image,
+                imageTmpPath,
             },
             include: {
                 user: { select: selectUser },
@@ -97,27 +102,33 @@ export const createComment = async (req, res, next) => {
             },
         });
 
-        // Notify vehicle owner
-        if (vehicle.ownerId !== req.user.id) {
-            try {
-                await notifyUser({
-                    userId: vehicle.ownerId,
-                    type: "COMMENT_CREATED",
-                    title: "New comment on your vehicle",
-                    message: `${comment.user?.name || "Someone"} commented on your vehicle.`,
-                    email: vehicle.owner?.email || null,
-                });
-            } catch (notifyError) {
-                console.error("Failed to send comment notification:", notifyError?.message || notifyError);
-            }
-        }
-
-        return res.status(StatusCodes.CREATED).json({
+        // Respond first (fast), then notify the vehicle owner in the background.
+        res.status(StatusCodes.CREATED).json({
             success: true,
             status: StatusCodes.CREATED,
             message: "Comment created successfully.",
             data: serializeComment(comment),
         });
+
+        if (vehicle.ownerId !== req.user.id) {
+            const payload = {
+                userId: vehicle.ownerId,
+                type: "COMMENT_CREATED",
+                title: "New comment on your vehicle",
+                message: `${comment.user?.name || "Someone"} commented on your vehicle.`,
+                email: vehicle.owner?.email || null,
+            };
+
+            Promise.resolve(enqueueNotification(payload))
+                .then((queued) => (queued ? null : notifyUser(payload)))
+                .catch((notifyError) => {
+                    console.error(
+                        "Failed to send comment notification:",
+                        notifyError?.message || notifyError,
+                    );
+                });
+        }
+        return;
     } catch (error) {
         next(error);
     }
@@ -201,6 +212,8 @@ export const getVehicleComments = async (req, res, next) => {
         const page = parsed.page || 1;
         const pageSize = parsed.pageSize || 10;
         const skip = (page - 1) * pageSize;
+        const includeReplies =
+            String(req.query.includeReplies || "true").toLowerCase() !== "false";
 
         const [total, comments] = await Promise.all([
             prisma.comment.count({
@@ -214,20 +227,26 @@ export const getVehicleComments = async (req, res, next) => {
                 include: {
                     user: { select: selectUser },
                     _count: { select: { likes: true, replies: true } },
-                    replies: {
-                        orderBy: { createdAt: "asc" },
-                        include: {
-                            user: { select: selectUser },
-                            _count: { select: { likes: true, replies: true } },
-                        },
-                    },
+                    ...(includeReplies
+                        ? {
+                              replies: {
+                                  orderBy: { createdAt: "asc" },
+                                  include: {
+                                      user: { select: selectUser },
+                                      _count: { select: { likes: true, replies: true } },
+                                  },
+                              },
+                          }
+                        : {}),
                 },
             }),
         ]);
 
         const data = comments.map((comment) => ({
             ...serializeComment(comment),
-            replies: comment.replies.map(serializeComment),
+            replies: includeReplies
+                ? (comment.replies || []).map(serializeComment)
+                : undefined,
         }));
 
         return res.status(StatusCodes.OK).json({
